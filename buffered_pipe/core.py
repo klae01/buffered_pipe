@@ -3,21 +3,46 @@ import pickle
 import tempfile
 import threading
 import copy
-from multiprocessing.shared_memory import SharedMemory
-from .module import init_sema, create_pipe, send_bytes, recv_bytes
+import time
+import random
 
+from .module import init_sema, create_shm, delete_shm, create_pipe, send_bytes, recv_bytes
+
+def __random_string(length = 5, use_upper = False, use_lower = True, use_number = True):
+    set = []
+    if use_upper: set += list(range(ord('A'),ord('Z') + 1))
+    if use_lower: set += list(range(ord('a'),ord('z') + 1))
+    if use_number: set += list(range(ord('0'),ord('9') + 1))
+    return ''.join(map(chr, random.choices(set, k = length)))
 class SPipe:
     lock = threading.RLock()
+    @staticmethod
+    def __random_string(length = 5, use_upper = False, use_lower = True, use_number = True):
+        set = []
+        if use_upper: set += list(range(ord('A'),ord('Z') + 1))
+        if use_lower: set += list(range(ord('a'),ord('z') + 1))
+        if use_number: set += list(range(ord('0'),ord('9') + 1))
+        return ''.join(map(chr, random.choices(set, k = length)))
+    @staticmethod
+    def __random_sema_create(format):
+        while True:
+            s = SPipe.__random_string(5, use_upper = False, use_lower = True, use_number = True)
+            X = format.format(s)
+            if not init_sema((X, )):
+                break
+        return X
     def __init__(self, minimum_write = 64, size = 2 ** 25):
         with SPipe.lock:
-            self.sema1_fn = tempfile.NamedTemporaryFile(mode='w', prefix = f"{os.getpid()}_{id(self)}_1_", suffix=".sema").name
-            self.sema2_fn = tempfile.NamedTemporaryFile(mode='w', prefix = f"{os.getpid()}_{id(self)}_2_", suffix=".sema").name
+            self.shm_id = create_shm((size, ))
+            print("shm_id", self.shm_id)
+            self.size = size
 
-            self.shm = SharedMemory(create=True, size=size)
             self.minimum_write = minimum_write
-
-            init_sema((self.sema1_fn, ))
-            init_sema((self.sema2_fn, ))
+            sema_fn_base = f"{os.getpid()}_{id(self)}"
+            self.sema1_fn = SPipe.__random_sema_create(sema_fn_base+"_1_{}.sema")
+            self.sema2_fn = SPipe.__random_sema_create(sema_fn_base+"_2_{}.sema")
+            print(self.sema1_fn)
+            print(self.sema2_fn)
             self.pipe_id = None
             self.mode = None
     def set_mode(self, mode):
@@ -27,7 +52,7 @@ class SPipe:
         if self.pipe_id is None:
             assert self.mode is not None
             self.lock = threading.RLock()
-            self.pipe_id = create_pipe((self.sema1_fn, self.sema2_fn, self.shm.name, self.shm.size, self.minimum_write))
+            self.pipe_id = create_pipe((self.sema1_fn, self.sema2_fn, self.shm_id, self.size, self.minimum_write))
     def recv_bytes(self):
         assert 'R' == self.mode
         self.init()

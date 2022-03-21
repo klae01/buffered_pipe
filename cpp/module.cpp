@@ -30,7 +30,6 @@ private:
     int shm_id;
     int size;
     int pointer;
-    key_t shm_key;
     char *shm_buf;
 
 public : 
@@ -46,17 +45,13 @@ public :
     void write_request(char* data, int length) ;
 };
 
-Pipe::Pipe(char* sem_name1, char* sem_name2, key_t _shm_key, int _size, int _minimum_write)
+Pipe::Pipe(char* sem_name1, char* sem_name2, int _shm_id, int _size, int _minimum_write)
 {
     pointer = 0;
-    margin = 0;
     minimum_write = _minimum_write;
     size = _size;
-    shm_key = _shm_key;
-    if ( ( shm_id = shmget(shm_key, size , IPC_CREAT | 0666)) < 0 ) {
-        printf("Error getting shared memory id");
-        exit(1);
-    }
+    margin = size;
+    shm_id = _shm_id;
     if ( ( shm_buf = (char*)shmat( shm_id , NULL , 0 ) ) == (char *)-1) {
         printf("Error attaching shared memory id");
         exit(1);
@@ -102,43 +97,69 @@ std::vector<Pipe> pipe_vector;
 
 PyObject* init_sema(PyObject *, PyObject* args) {
     char *sem_name;
-    PyArg_ParseTuple(args, "s*", &sem_name);
-    sem_close(sem_open(sem_name, O_CREAT, 0644, 0));
+    PyArg_ParseTuple(args, "s", &sem_name);
+    sem_t *sem = sem_open(sem_name, O_CREAT, 0644, 0);
+    if(!sem) sem_close(sem);
+    return PyLong_FromUnsignedLongLong(sem == SEM_FAILED);
+}
+PyObject* create_shm(PyObject *, PyObject *args) {
+    // sem1, sem2, shm_id, shm_size, minimum_write 
+    int size, shm_id;
+    PyArg_ParseTuple(args, "i", &size);
+    shm_id = shmget(IPC_PRIVATE, size, IPC_CREAT | 0666);
+    return PyLong_FromUnsignedLongLong(shm_id);
+}
+PyObject* delete_shm(PyObject *, PyObject *args) {
+    // sem1, sem2, shm_id, shm_size, minimum_write 
+    int shm_id, result;
+    PyArg_ParseTuple(args, "i", &shm_id);
+    result = shmctl(shm_id, IPC_RMID, NULL);
+    return PyLong_FromUnsignedLongLong(result);
 }
 PyObject* create_pipe(PyObject *, PyObject *args) {
-    // sem1, sem2, shm_key, shm_size, minimum_write 
+    // sem1, sem2, shm_id, shm_size, minimum_write 
     unsigned long long id = pipe_vector.size();
     char *sem1, *sem2;
-    int shm_key, size, minimum_write;
-    PyArg_ParseTuple(args, "s*s*iii", &sem1, &sem2, &shm_key, &size, &minimum_write);
-    pipe_vector.push_back(Pipe(sem1, sem2, shm_key, size, minimum_write));
+    int shm_id, size, minimum_write;
+    PyArg_ParseTuple(args, "ssiii", &sem1, &sem2, &shm_id, &size, &minimum_write);
+    pipe_vector.push_back(Pipe(sem1, sem2, shm_id, size, minimum_write));
     return PyLong_FromUnsignedLongLong(id);
 }
-void send_bytes(PyObject *, PyObject *args) {
+PyObject* send_bytes(PyObject *, PyObject *args) {
     // pipe_id, data
     char*      req_data;
     Py_ssize_t req_len;
     int pipe_id;
-    PyArg_ParseTuple(args, "s#i", &req_data, &req_len, &pipe_id);
+    PyArg_ParseTuple(args, "iy#", &pipe_id, &req_data, &req_len);
+    // printf("pipes= %d\n", pipe_vector.size());
     class Pipe& P = pipe_vector[pipe_id];
     int remain_length, write_length;
     while(req_len) {
+        // printf("%d\n", req_len);
         remain_length = req_len + 4;
+        // printf("send 1\n");
+        int sem_val;
+        // printf("%p, %p\n", P.sem_a, P.sem_f);
+        sem_getvalue(P.sem_f, &sem_val);
+        // printf("deque = %d sema = %d\n", P.deque.size(), sem_val);
         while(P.margin < remain_length && !sem_trywait(P.sem_f)) {
             P.margin += P.deque.front();
             P.deque.pop_front();
         }
+        // printf("send 2\n");
         while(P.margin < remain_length && P.margin < P.minimum_write) {
             sem_wait(P.sem_f);
             P.margin += P.deque.front();
             P.deque.pop_front();
         }
+        // printf("send 3\n");
         
         write_length = std::min(P.margin, remain_length) - 4;
         if( write_length < req_len )
             P.write_request(IntTochars(-write_length), 4);
         else
             P.write_request(IntTochars(write_length), 4);
+        // printf("send 4\n");
         P.write_request(req_data, write_length);
         P.deque.push_back(write_length);
         req_data += write_length;
@@ -146,6 +167,8 @@ void send_bytes(PyObject *, PyObject *args) {
         req_len -= write_length;
         sem_post(P.sem_a);
     }
+    // printf("send finish\n");
+    return PyLong_FromUnsignedLongLong(0);
 }
 PyObject* recv_bytes(PyObject *, PyObject* args) {
     // pipe_id
@@ -155,6 +178,7 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
     char buf[5];
     int FLAG = true;
     buffer.resize(0);
+    // printf("recv start\n");
     while(FLAG) {
         sem_wait(P.sem_a);
         int length = charsToInt(P.read_request(buf, 4));
@@ -162,6 +186,7 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
         sem_post(P.sem_f);
         FLAG = length < 0;
     }
+    // printf("recv finish\n");
     return PyBytes_FromStringAndSize(&buffer[0], buffer.size());
 }
  
@@ -169,6 +194,8 @@ static PyMethodDef methods[] = {
     // The first property is the name exposed to Python, fast_tanh, the second is the C++
     // function name that contains the implementation.
     { "init_sema", (PyCFunction)init_sema, METH_O, nullptr },
+    { "create_shm", (PyCFunction)create_shm, METH_O, nullptr },
+    { "delete_shm", (PyCFunction)delete_shm, METH_O, nullptr },
     { "create_pipe", (PyCFunction)create_pipe, METH_O, nullptr },
     { "send_bytes", (PyCFunction)send_bytes, METH_O, nullptr },
     { "recv_bytes", (PyCFunction)recv_bytes, METH_O, nullptr },
