@@ -28,32 +28,32 @@ char* IntTochars(int data) {
 class Pipe {
 private:
     int shm_id;
-    int size;
-    int pointer;
+    int shm_size;
     char *shm_buf;
 
 public : 
     sem_t *sem_a; // allocate
     sem_t *sem_f; // free
+    int pointer;
     int margin;
     int minimum_write;
     std::deque<int>deque;
     
-    Pipe(char* sem_name1, char* sem_name2, key_t shm_key, int size, int minimum_write) ;
+    Pipe(char* sem_name1, char* sem_name2, key_t shm_key, int shm_size, int minimum_write) ;
     char* read_request(char* buf, int length) ;
     void read_request(int length) ;
     void write_request(char* data, int length) ;
 };
 
-Pipe::Pipe(char* sem_name1, char* sem_name2, int _shm_id, int _size, int _minimum_write)
+Pipe::Pipe(char* sem_name1, char* sem_name2, int _shm_id, int _shm_size, int _minimum_write)
 {
     pointer = 0;
     minimum_write = _minimum_write;
-    size = _size;
-    margin = size;
+    shm_size = _shm_size;
+    margin = shm_size;
     shm_id = _shm_id;
     if ( ( shm_buf = (char*)shmat( shm_id , NULL , 0 ) ) == (char *)-1) {
-        printf("Error attaching shared memory id");
+        // printf("Error attaching shared memory id");
         exit(1);
     }
     sem_a = sem_open(sem_name1, O_CREAT, 0644);
@@ -61,20 +61,20 @@ Pipe::Pipe(char* sem_name1, char* sem_name2, int _shm_id, int _size, int _minimu
 }
 char* Pipe::read_request(char* buf, int length) {
     int lookup = 0;
-    if(size < pointer + length) {
-        length -= size - pointer;
-        for(; pointer < size; pointer++, lookup++ )
-            buf[lookup] = shm_buf[pointer];
+    if(shm_size < pointer + length) {
+        length -= shm_size - pointer;
+        for(; pointer < shm_size;)
+            buf[lookup++] = shm_buf[pointer++];
         pointer = 0;
     }
-    for(; length; pointer++, length--, lookup++ )
-        buf[lookup] = shm_buf[pointer];
+    for(; length; length--)
+        buf[lookup++] = shm_buf[pointer++];
     return buf;
 }
 void Pipe::read_request(int length) {
-    if(size < pointer + length) {
-        length -= size - pointer;
-        for(; pointer < size; pointer++ )
+    if(shm_size < pointer + length) {
+        length -= shm_size - pointer;
+        for(; pointer < shm_size; pointer++ )
             buffer.push_back(shm_buf[pointer]);
         pointer = 0;
     }
@@ -83,14 +83,17 @@ void Pipe::read_request(int length) {
 }
 void Pipe::write_request(char* data, int length) {
     int lookup = 0;
-    if(size < pointer + length) {
-        length -= size - pointer;
-        for(; pointer < size; pointer++, lookup++ )
-            shm_buf[pointer] = data[lookup];
+    // printf("write_request 1 | pointer = %d | lookup = %d | length = %d | size %d \n", pointer, lookup, length, shm_size );
+    if(shm_size < pointer + length) {
+        length -= shm_size - pointer;
+        for(; pointer != shm_size;)
+            shm_buf[pointer++] = data[lookup++];
         pointer = 0;
     }
-    for(; length; pointer++, length--, lookup++ )
-        shm_buf[pointer] = data[lookup];
+    // printf("write_request 2 | pointer = %d | lookup = %d | length = %d \n", pointer, lookup, length);
+    for(; length; length-- )
+        shm_buf[pointer++] = data[lookup++];
+    // printf("write_request 3 | pointer = %d | lookup = %d | length = %d \n", pointer, lookup, length);
 }
 
 std::vector<Pipe> pipe_vector;
@@ -104,9 +107,9 @@ PyObject* init_sema(PyObject *, PyObject* args) {
 }
 PyObject* create_shm(PyObject *, PyObject *args) {
     // sem1, sem2, shm_id, shm_size, minimum_write 
-    int size, shm_id;
-    PyArg_ParseTuple(args, "i", &size);
-    shm_id = shmget(IPC_PRIVATE, size, IPC_CREAT | 0666);
+    int shm_size, shm_id;
+    PyArg_ParseTuple(args, "i", &shm_size);
+    shm_id = shmget(IPC_PRIVATE, shm_size, IPC_CREAT | 0666);
     return PyLong_FromUnsignedLongLong(shm_id);
 }
 PyObject* delete_shm(PyObject *, PyObject *args) {
@@ -120,9 +123,9 @@ PyObject* create_pipe(PyObject *, PyObject *args) {
     // sem1, sem2, shm_id, shm_size, minimum_write 
     unsigned long long id = pipe_vector.size();
     char *sem1, *sem2;
-    int shm_id, size, minimum_write;
-    PyArg_ParseTuple(args, "ssiii", &sem1, &sem2, &shm_id, &size, &minimum_write);
-    pipe_vector.push_back(Pipe(sem1, sem2, shm_id, size, minimum_write));
+    int shm_id, shm_size, minimum_write;
+    PyArg_ParseTuple(args, "ssiii", &sem1, &sem2, &shm_id, &shm_size, &minimum_write);
+    pipe_vector.push_back(Pipe(sem1, sem2, shm_id, shm_size, minimum_write));
     return PyLong_FromUnsignedLongLong(id);
 }
 PyObject* send_bytes(PyObject *, PyObject *args) {
@@ -133,35 +136,36 @@ PyObject* send_bytes(PyObject *, PyObject *args) {
     PyArg_ParseTuple(args, "iy#", &pipe_id, &req_data, &req_len);
     // printf("pipes= %d\n", pipe_vector.size());
     class Pipe& P = pipe_vector[pipe_id];
-    int remain_length, write_length;
+    int critical_length, write_length;
     while(req_len) {
         // printf("%d\n", req_len);
-        remain_length = req_len + 4;
-        // printf("send 1\n");
+        critical_length = req_len + 4;
         int sem_val;
-        // printf("%p, %p\n", P.sem_a, P.sem_f);
         sem_getvalue(P.sem_f, &sem_val);
-        // printf("deque = %d sema = %d\n", P.deque.size(), sem_val);
-        while(P.margin < remain_length && !sem_trywait(P.sem_f)) {
+        // printf("send 1 deque = %d, sema = %d, margin = %d\n", P.deque.size(), sem_val, P.margin);
+        while(P.margin < critical_length && !sem_trywait(P.sem_f)) {
             P.margin += P.deque.front();
             P.deque.pop_front();
         }
-        // printf("send 2\n");
-        while(P.margin < remain_length && P.margin < P.minimum_write) {
+        // printf("send 2, margin = %d, remain = %d\n", P.margin, critical_length);
+        Py_BEGIN_ALLOW_THREADS 
+        while(P.margin < critical_length && P.margin < P.minimum_write) {
             sem_wait(P.sem_f);
             P.margin += P.deque.front();
             P.deque.pop_front();
         }
-        // printf("send 3\n");
+        Py_END_ALLOW_THREADS 
+        // printf("send 3 pointer = %d\n", P.pointer);
         
-        write_length = std::min(P.margin, remain_length) - 4;
+        write_length = std::min(P.margin, critical_length) - 4;
         if( write_length < req_len )
             P.write_request(IntTochars(-write_length), 4);
         else
             P.write_request(IntTochars(write_length), 4);
         // printf("send 4\n");
         P.write_request(req_data, write_length);
-        P.deque.push_back(write_length);
+        // printf("send 5\n");
+        P.deque.push_back(write_length + 4);
         req_data += write_length;
         P.margin -= write_length + 4;
         req_len -= write_length;
@@ -178,15 +182,24 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
     char buf[5];
     int FLAG = true;
     buffer.resize(0);
-    // printf("recv start\n");
+    int sem_val;
+    sem_getvalue(P.sem_a, &sem_val);
+    // printf("recv 1 semaphore: %d\n", sem_val);
     while(FLAG) {
+        Py_BEGIN_ALLOW_THREADS 
         sem_wait(P.sem_a);
+        Py_END_ALLOW_THREADS 
         int length = charsToInt(P.read_request(buf, 4));
+        // printf("recv 2 length = %d\n", length);
         P.read_request(std::abs(length));
-        sem_post(P.sem_f);
         FLAG = length < 0;
+
+        // printf("recv reading flag = %d\n", FLAG);
+        sem_post(P.sem_f);
+        // printf("recv sema post \n");
     }
     // printf("recv finish\n");
+
     return PyBytes_FromStringAndSize(&buffer[0], buffer.size());
 }
  
