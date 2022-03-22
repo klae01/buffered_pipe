@@ -8,7 +8,7 @@ from typing import Tuple, Any
 
 from .module import create_sem, delete_sem, attach_sem, detach_sem
 from .module import create_shm, delete_shm, attach_shm, detach_shm
-from .module import send_bytes, recv_bytes
+from .module import send_bytes, recv_bytes, get_id
 
 def random_string(length = 5, use_upper = False, use_lower = True, use_number = True):
     set = []
@@ -23,7 +23,7 @@ class connection:
     def send(self, item: bytes) -> None: ...
 
 class SPipe(connection):
-    lock = threading.RLock()
+    lock = threading.Lock()
     @staticmethod
     def __random_sema_create(format):
         while True:
@@ -52,9 +52,6 @@ class SPipe(connection):
             self.resource_owner = None
 
             self.mode = None
-    @staticmethod
-    def get_id():
-        return multiprocessing.current_process().ident#, threading.current_thread().ident
     def set_mode(self, mode):
         assert self.mode is None
         assert mode in ['R', 'W']
@@ -67,20 +64,22 @@ class SPipe(connection):
             self.pointer_f = 0
             self.margin = self.shm_size
     def init(self):
-        with SPipe.lock:
-            if self.resource_owner != SPipe.get_id():
-                print("SPIPE ID", SPipe.get_id())
-                self.resource_owner = SPipe.get_id()
-                assert self.mode is not None
-                self.lock = threading.RLock()
+        current_id = get_id()
+        if self.resource_owner != current_id:
+            with SPipe.lock:
+                if self.resource_owner != current_id:
+                    print("SPIPE ID", current_id)
+                    self.resource_owner = current_id
+                    assert self.mode is not None
+                    self.lock = threading.Lock()
 
-                self.shm_ptr = attach_shm((self.shm_id,))
-                self.sema1_ptr = attach_sem((self.sema1_fn,))
-                self.sema2_ptr = attach_sem((self.sema2_fn,))
-                
-                print("shm_ptr:", self.shm_ptr)
-                print("sem1_ptr:", self.sema1_ptr)
-                print("sem2_ptr:", self.sema2_ptr)
+                    self.shm_ptr = attach_shm((self.shm_id,))
+                    self.sema1_ptr = attach_sem((self.sema1_fn,))
+                    self.sema2_ptr = attach_sem((self.sema2_fn,))
+                    
+                    print("shm_ptr:", self.shm_ptr)
+                    print("sem1_ptr:", self.sema1_ptr)
+                    print("sem2_ptr:", self.sema2_ptr)
                 
 
     def recv_bytes(self):
@@ -98,7 +97,7 @@ class SPipe(connection):
         self.init()
         with self.lock:
             self.pointer_a, self.pointer_f, self.margin = send_bytes((self.shm_ptr, self.shm_size, self.sema1_ptr, self.sema2_ptr, self.minimum_write, self.pointer_a, self.pointer_f, self.margin, data))
-    def recv(self) -> Any:
+    def recv(self):
         return pickle.loads(self.recv_bytes())
     def send(self, item):
         self.send_bytes(pickle.dumps(item))
