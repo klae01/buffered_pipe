@@ -1,4 +1,4 @@
-import buffered_pipe
+from . import Pipe
 import multiprocessing
 import time
 import threading
@@ -22,8 +22,8 @@ if __name__ == "__main__":
     # multiprocessing.set_start_method('fork')
     # multiprocessing.set_start_method('forkserver')
     virtural_method = threading.Thread
-    # virtural_method = multiprocessing.Process
-    pipe_r, pipe_w = buffered_pipe.Pipe(False, size = 2**8)
+    virtural_method = multiprocessing.Process
+    pipe_r, pipe_w = Pipe(False, size = 2**8)
     queue = multiprocessing.Queue()
     cnt = 100000
     P = virtural_method(target=f, args = (pipe_w, queue, cnt))
