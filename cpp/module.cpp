@@ -20,9 +20,10 @@ typedef uintptr_t PTR_TYPE;
 
 // create_sem, delete_sem, attach_sem, detach_sem
 // create_shm, delete_shm, attach_shm, detach_shm
-// send_bytes, recv_bytes
+// recv_bytes, send_bytes
+// getpid
 
-PyObject* get_id(PyObject *) {
+PyObject* _getpid(PyObject *) {
     return PyLong_FromUnsignedLongLong(getpid());
 }
 
@@ -152,19 +153,57 @@ BASE_TYPE chunk_size(char *shm_buf, OP_TYPE shm_size, OP_TYPE pointer) {
     }
     return i2c_value.v;
 }
+
 BASE_TYPE abs_chunk_size(char *shm_buf, OP_TYPE shm_size, OP_TYPE pointer) {
     return std::abs(chunk_size(shm_buf, shm_size, pointer));
 }
+
 BASE_TYPE write_int(char *shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE value) {
     int2char i2c_value;
     i2c_value.v = value;
     return write_request(shm_buf, shm_size, pointer, i2c_value.c, LENGTH_INFO);
 }
-void printf_hex(char *shm_buf, BASE_TYPE shm_size) {
-    for (int i = 0; i < shm_size; i++)
-        printf("%02x ", (unsigned char)shm_buf[i]);
-    printf("\n");
+
+// void printf_hex(char *shm_buf, BASE_TYPE shm_size) {
+//     for (int i = 0; i < shm_size; i++)
+//         printf("%02x ", (unsigned char)shm_buf[i]);
+//     printf("\n");
+// }
+
+PyObject* recv_bytes(PyObject *, PyObject* args) {
+    // shm_buf, shm_size, sem_a, sem_f, pointer
+    // return pointer, data
+    PTR_LOAD_TYPE _shm_buf, _sem_a, _sem_f;
+    BASE_TYPE shm_size, pointer;
+    PyArg_ParseTuple(args, "LLLLL", &_shm_buf, &shm_size, &_sem_a, &_sem_f, &pointer);
+    char* shm_buf = (char*)LL2PTR(_shm_buf);
+    sem_t *sem_a = (sem_t*)LL2PTR(_sem_a), *sem_f = (sem_t*)LL2PTR(_sem_f);
+
+    int FLAG = true;
+    std::deque<PyObject*> result;
+    BASE_TYPE length, remain;
+    while(FLAG) {
+        if(sem_trywait(sem_a)) {
+            Py_BEGIN_ALLOW_THREADS 
+            sem_wait(sem_a);
+            Py_END_ALLOW_THREADS 
+        }
+
+        length = chunk_size(shm_buf, shm_size, pointer);
+        pointer = (pointer + LENGTH_INFO) % shm_size;
+        remain = std::abs(length);
+        FLAG = length < 0;
+        
+        pointer = read_request(shm_buf, shm_size, pointer, remain, result);
+
+        sem_post(sem_f);
+    }
+    PyObject *return_list = PyList_New(result.size());
+    int index = 0;
+    for(auto&I:result) PyList_SetItem(return_list, index++, I);
+    return Py_BuildValue("LO", pointer, return_list);
 }
+
 PyObject* send_bytes(PyObject *, PyObject *args) {
     // shm_buf, shm_size, sem_a, sem_f, minimum_write, pointer_a, pointer_f, margin, data
     // return pointer_a, pointer_f, margin
@@ -208,39 +247,6 @@ PyObject* send_bytes(PyObject *, PyObject *args) {
     }
     return Py_BuildValue("LLL", pointer_a, pointer_f, margin);
 }
-PyObject* recv_bytes(PyObject *, PyObject* args) {
-    // shm_buf, shm_size, sem_a, sem_f, pointer
-    // return pointer, data
-    PTR_LOAD_TYPE _shm_buf, _sem_a, _sem_f;
-    BASE_TYPE shm_size, pointer;
-    PyArg_ParseTuple(args, "LLLLL", &_shm_buf, &shm_size, &_sem_a, &_sem_f, &pointer);
-    char* shm_buf = (char*)LL2PTR(_shm_buf);
-    sem_t *sem_a = (sem_t*)LL2PTR(_sem_a), *sem_f = (sem_t*)LL2PTR(_sem_f);
-
-    int FLAG = true;
-    std::deque<PyObject*> result;
-    BASE_TYPE length, remain, chunk;
-    while(FLAG) {
-        if(sem_trywait(sem_a)) {
-            Py_BEGIN_ALLOW_THREADS 
-            sem_wait(sem_a);
-            Py_END_ALLOW_THREADS 
-        }
-
-        length = chunk_size(shm_buf, shm_size, pointer);
-        pointer = (pointer + LENGTH_INFO) % shm_size;
-        remain = std::abs(length);
-        FLAG = length < 0;
-        
-        pointer = read_request(shm_buf, shm_size, pointer, remain, result);
-
-        sem_post(sem_f);
-    }
-    PyObject *return_list = PyList_New(result.size());
-    int index = 0;
-    for(auto&I:result) PyList_SetItem(return_list, index++, I);
-    return Py_BuildValue("LO", pointer, return_list);
-}
 static PyMethodDef methods[] = {
     // The first property is the name exposed to Python, fast_tanh, the second is the C++
     // function name that contains the implementation.
@@ -252,9 +258,9 @@ static PyMethodDef methods[] = {
     { "delete_shm", (PyCFunction)delete_shm, METH_O, nullptr },
     { "attach_shm", (PyCFunction)attach_shm, METH_O, nullptr },
     { "detach_shm", (PyCFunction)detach_shm, METH_O, nullptr },
-    { "send_bytes", (PyCFunction)send_bytes, METH_O, nullptr },
     { "recv_bytes", (PyCFunction)recv_bytes, METH_O, nullptr },
-    { "get_id", (PyCFunction)get_id, METH_NOARGS, nullptr },
+    { "send_bytes", (PyCFunction)send_bytes, METH_O, nullptr },
+    { "getpid", (PyCFunction)_getpid, METH_NOARGS, nullptr },
  
     // Terminate the array with an object containing nulls.
     { nullptr, nullptr, 0, nullptr }
