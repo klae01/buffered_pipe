@@ -1,4 +1,4 @@
-#pragma GCC optimize("O3")
+#pragma GCC optimize("O2")
 
 #include <Python.h>
 
@@ -13,6 +13,7 @@
 const int LENGTH_INFO = 4;
 typedef long long OP_TYPE;
 typedef long long BASE_TYPE;
+typedef long long PTR_LOAD_TYPE;
 typedef uintptr_t PTR_TYPE;
 
 #define PTR2LL(x) (long long)(uintptr_t)(x)
@@ -21,7 +22,6 @@ typedef uintptr_t PTR_TYPE;
 // create_sem, delete_sem, attach_sem, detach_sem
 // create_shm, delete_shm, attach_shm, detach_shm
 // send_bytes, recv_bytes
-std::vector<char> recv_buffer(1024);
 
 PyObject* get_id(PyObject *) {
     return PyLong_FromUnsignedLongLong(getpid());
@@ -51,7 +51,7 @@ PyObject* attach_sem(PyObject *, PyObject* args) {
 }
 
 PyObject* detach_sem(PyObject *, PyObject* args) {
-    PTR_TYPE sem_ptr;
+    PTR_LOAD_TYPE sem_ptr;
     BASE_TYPE result;
     PyArg_ParseTuple(args, "L", &sem_ptr);
     result = sem_close((sem_t*)LL2PTR(sem_ptr));
@@ -73,15 +73,15 @@ PyObject* delete_shm(PyObject *, PyObject* args) {
 }
 
 PyObject* attach_shm(PyObject *, PyObject* args) {
-    PTR_TYPE shmaddr;
-    BASE_TYPE result;
-    PyArg_ParseTuple(args, "L", &shmaddr);
-    result = PTR2LL(shmat(shmaddr, NULL, 0));
-    return PyLong_FromLongLong(result);
+    PTR_LOAD_TYPE shmid;
+    BASE_TYPE shmaddr;
+    PyArg_ParseTuple(args, "L", &shmid);
+    shmaddr = PTR2LL(shmat(shmid, NULL, 0));
+    return PyLong_FromLongLong(shmaddr);
 }
 
 PyObject* detach_shm(PyObject *, PyObject* args) {
-    PTR_TYPE shmaddr;
+    PTR_LOAD_TYPE shmaddr;
     BASE_TYPE result;
     PyArg_ParseTuple(args, "L", &shmaddr);
     result = shmdt(LL2PTR(shmaddr));
@@ -104,11 +104,11 @@ BASE_TYPE read_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE
     OP_TYPE lookup = 0;
     if(shm_size < pointer + length) {
         lookup = shm_size - pointer;
-        std::memcpy(result, shm_buf + pointer, lookup);
+        memmove(result, shm_buf + pointer, lookup);
         length -= lookup;
         pointer = 0;
     }
-    std::memcpy(result + lookup, shm_buf + pointer, length);
+    memmove(result + lookup, shm_buf + pointer, length);
     return pointer + length;
 }
 
@@ -116,12 +116,12 @@ BASE_TYPE write_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, char* 
     OP_TYPE tmp;
     if(shm_size < pointer + length) {
         tmp = shm_size - pointer;
-        std::memcpy(shm_buf+pointer, data, tmp);
+        memmove(shm_buf+pointer, data, tmp);
         data += tmp;
         length -= tmp;
         pointer = 0;
     }
-    std::memcpy(shm_buf+pointer, data, length);
+    memmove(shm_buf+pointer, data, length);
     return pointer + length;
 }
 
@@ -132,7 +132,7 @@ union int2char {
 };
 // BASE_TYPE charsToInt(char *data) {
 //     int2char i2c_value;
-//     std::memcpy(i2c_value.c, data, LENGTH_INFO);
+//     memmove(i2c_value.c, data, LENGTH_INFO);
 //     return i2c_value.v;
 // }
 // char* IntTochars(BASE_TYPE data) {
@@ -142,9 +142,15 @@ union int2char {
 // }
 
 BASE_TYPE chunk_size(char *shm_buf, OP_TYPE shm_size, OP_TYPE pointer) {
-    int2char i2c_value;
+    int2char i2c_value, i2c_cast;
     i2c_value.v = 0;
     read_request(shm_buf, shm_size, pointer, LENGTH_INFO, i2c_value.c);
+    
+    if(i2c_value.c[LENGTH_INFO - 1] < 0) {
+        i2c_cast.v = -1;
+        memmove(i2c_cast.c, i2c_value.c, LENGTH_INFO);
+        return i2c_cast.v;
+    }
     return i2c_value.v;
 }
 BASE_TYPE abs_chunk_size(char *shm_buf, OP_TYPE shm_size, OP_TYPE pointer) {
@@ -165,7 +171,7 @@ PyObject* send_bytes(PyObject *, PyObject *args) {
     // return pointer_a, pointer_f, margin
     char*      req_data;
     Py_ssize_t req_len = 0;
-    PTR_TYPE _shm_buf, _sem_a, _sem_f;
+    PTR_LOAD_TYPE _shm_buf, _sem_a, _sem_f;
     BASE_TYPE shm_size, minimum_write, pointer_a, pointer_f, margin;
     PyArg_ParseTuple(args, "LLLLLLLLy#", &_shm_buf, &shm_size, &_sem_a, &_sem_f, &minimum_write, &pointer_a, &pointer_f, &margin, &req_data, &req_len);
     char* shm_buf = (char*)LL2PTR(_shm_buf);
@@ -206,15 +212,16 @@ PyObject* send_bytes(PyObject *, PyObject *args) {
 PyObject* recv_bytes(PyObject *, PyObject* args) {
     // shm_buf, shm_size, sem_a, sem_f, pointer
     // return pointer, data
-    PTR_TYPE _shm_buf, _sem_a, _sem_f;
-    BASE_TYPE shm_size, pointer;
+    PTR_LOAD_TYPE _shm_buf, _sem_a, _sem_f;
+    BASE_TYPE shm_size, pointer, load_max = 4096;
     PyArg_ParseTuple(args, "LLLLL", &_shm_buf, &shm_size, &_sem_a, &_sem_f, &pointer);
     char* shm_buf = (char*)LL2PTR(_shm_buf);
     sem_t *sem_a = (sem_t*)LL2PTR(_sem_a), *sem_f = (sem_t*)LL2PTR(_sem_f);
+    char* buffer = new char[load_max];
 
     int FLAG = true;
-    std::deque<char> buffer;
-    BASE_TYPE length;
+    PyObject *result = PyList_New(0);
+    BASE_TYPE length, remain, chunk;
     while(FLAG) {
         if(sem_trywait(sem_a)) {
             Py_BEGIN_ALLOW_THREADS 
@@ -224,16 +231,20 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
 
         length = chunk_size(shm_buf, shm_size, pointer);
         pointer = (pointer + LENGTH_INFO) % shm_size;
-        
-        pointer = read_request(shm_buf, shm_size, pointer, std::abs(length), buffer);
+        remain = std::abs(length);
         FLAG = length < 0;
+        
+        while(remain) {
+            chunk = std::min(load_max, remain);
+            remain -= chunk;
+            pointer = read_request(shm_buf, shm_size, pointer, chunk, buffer);
+            PyList_Append(result, PyBytes_FromStringAndSize(buffer, chunk));
+        }
 
         sem_post(sem_f);
     }
-
-    recv_buffer.resize(0);
-    std::move(buffer.begin(), buffer.end(), std::back_inserter(recv_buffer));
-    return Py_BuildValue("Ly#", pointer, &recv_buffer[0], (Py_ssize_t)recv_buffer.size());
+    delete buffer;
+    return Py_BuildValue("LO", pointer, result);
 }
 static PyMethodDef methods[] = {
     // The first property is the name exposed to Python, fast_tanh, the second is the C++

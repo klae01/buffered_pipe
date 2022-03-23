@@ -89,7 +89,7 @@ class SPipe(connection):
         self.init()
         with self.lock:
             self.pointer, data = recv_bytes((self.shm_ptr, self.shm_size, self.sema1_ptr, self.sema2_ptr, self.pointer))
-        return data
+        return b''.join(data)
     def send_bytes(self, data):
         # shm_buf, shm_size, sem_a, sem_f, pointer_a, pointer_f, margin, data
         # return margin, pointer_a, pointer_f
@@ -102,13 +102,13 @@ class SPipe(connection):
     def send(self, item):
         self.send_bytes(pickle.dumps(item))
     def __del__(self):
-        detach_shm((self.shm_ptr, ))
-        detach_sem((self.sema1_ptr, ))
-        detach_sem((self.sema2_ptr, ))
+        detach_shm((self.shm_ptr, )); self.shm_ptr = None
+        detach_sem((self.sema1_ptr, )); self.sema1_ptr = None
+        detach_sem((self.sema2_ptr, )); self.sema2_ptr = None
 
-        delete_shm((self.shm_id,))
-        delete_sem((self.sema1_fn,))
-        delete_sem((self.sema2_fn,))
+        delete_shm((self.shm_id,)); self.shm_id = None
+        delete_sem((self.sema1_fn,)); self.sema1_fn = None
+        delete_sem((self.sema2_fn,)); self.sema2_fn = None
 
 class BPipe(connection):
     def __init__(self, minimum_write=64, size=2 ** 25):
