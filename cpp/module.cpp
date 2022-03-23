@@ -6,9 +6,8 @@
 #include <sys/shm.h>
 #include <sys/types.h>
 #include <semaphore.h>
-#include <vector>
+#include <string.h>
 #include <deque>
-#include <cstring>
 
 const int LENGTH_INFO = 4;
 typedef long long OP_TYPE;
@@ -88,18 +87,6 @@ PyObject* detach_shm(PyObject *, PyObject* args) {
     return PyLong_FromLongLong(result);
 }
 
-BASE_TYPE read_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE length, std::deque<char> &result) {
-    if(shm_size < pointer + length) {
-        for(char *lookup = shm_buf + pointer, *end = shm_buf + shm_size; lookup != end;)
-            result.push_back(*lookup++);
-        length -= shm_size - pointer;
-        pointer = 0;
-    }
-    for(char *lookup = shm_buf + pointer, *end = shm_buf + pointer + length; lookup != end;)
-        result.push_back(*lookup++);
-    return pointer + length;
-}
-
 BASE_TYPE read_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE length, char*result) {
     OP_TYPE lookup = 0;
     if(shm_size < pointer + length) {
@@ -109,6 +96,18 @@ BASE_TYPE read_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE
         pointer = 0;
     }
     memmove(result + lookup, shm_buf + pointer, length);
+    return pointer + length;
+}
+
+BASE_TYPE read_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE length, std::deque<PyObject*>&result) {
+    OP_TYPE lookup = 0;
+    if(shm_size < pointer + length) {
+        lookup = shm_size - pointer;
+        if(lookup) result.push_back(PyBytes_FromStringAndSize(shm_buf + pointer, lookup));
+        length -= lookup;
+        pointer = 0;
+    }
+    if(length) result.push_back(PyBytes_FromStringAndSize(shm_buf + pointer, length));
     return pointer + length;
 }
 
@@ -213,14 +212,13 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
     // shm_buf, shm_size, sem_a, sem_f, pointer
     // return pointer, data
     PTR_LOAD_TYPE _shm_buf, _sem_a, _sem_f;
-    BASE_TYPE shm_size, pointer, load_max = 4096;
+    BASE_TYPE shm_size, pointer;
     PyArg_ParseTuple(args, "LLLLL", &_shm_buf, &shm_size, &_sem_a, &_sem_f, &pointer);
     char* shm_buf = (char*)LL2PTR(_shm_buf);
     sem_t *sem_a = (sem_t*)LL2PTR(_sem_a), *sem_f = (sem_t*)LL2PTR(_sem_f);
-    char* buffer = new char[load_max];
 
     int FLAG = true;
-    PyObject *result = PyList_New(0);
+    std::deque<PyObject*> result;
     BASE_TYPE length, remain, chunk;
     while(FLAG) {
         if(sem_trywait(sem_a)) {
@@ -234,17 +232,14 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
         remain = std::abs(length);
         FLAG = length < 0;
         
-        while(remain) {
-            chunk = std::min(load_max, remain);
-            remain -= chunk;
-            pointer = read_request(shm_buf, shm_size, pointer, chunk, buffer);
-            PyList_Append(result, PyBytes_FromStringAndSize(buffer, chunk));
-        }
+        pointer = read_request(shm_buf, shm_size, pointer, remain, result);
 
         sem_post(sem_f);
     }
-    delete buffer;
-    return Py_BuildValue("LO", pointer, result);
+    PyObject *return_list = PyList_New(result.size());
+    int index = 0;
+    for(auto&I:result) PyList_SetItem(return_list, index++, I);
+    return Py_BuildValue("LO", pointer, return_list);
 }
 static PyMethodDef methods[] = {
     // The first property is the name exposed to Python, fast_tanh, the second is the C++

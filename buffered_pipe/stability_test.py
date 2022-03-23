@@ -160,6 +160,11 @@ if __name__ == "__main__":
     test(large_array_transfer, large_array_answer, 2**15, 10000, 8433, size = 2 ** 7)
 
     print("\n\ntest GROUP 10")
+    test(large_array_transfer, large_array_answer, 2**20, 100, 166, size = 2 ** 16)
+    test(large_array_transfer, large_array_answer, 2**25, 100, 15777, size = 2 ** 16)
+    test(large_array_transfer, large_array_answer, 2**30, 100, 8433, size = 2 ** 16)
+
+    print("\n\ntest GROUP 11")
     test(large_array_transfer, large_array_answer, 2**20, 100, 166, size = 2 ** 7)
     test(large_array_transfer, large_array_answer, 2**25, 100, 15777, size = 2 ** 7)
     test(large_array_transfer, large_array_answer, 2**30, 100, 8433, size = 2 ** 7)

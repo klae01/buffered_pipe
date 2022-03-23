@@ -32,7 +32,7 @@ class SPipe(connection):
             if not create_sem((X, )):
                 break
         return X
-    def __init__(self, minimum_write = 64, size = 2 ** 25):
+    def __init__(self, minimum_write, size):
         with SPipe.lock:
             self.minimum_write = minimum_write
             self.shm_size = size
@@ -102,16 +102,28 @@ class SPipe(connection):
     def send(self, item):
         self.send_bytes(pickle.dumps(item))
     def __del__(self):
-        detach_shm((self.shm_ptr, )); self.shm_ptr = None
-        detach_sem((self.sema1_ptr, )); self.sema1_ptr = None
-        detach_sem((self.sema2_ptr, )); self.sema2_ptr = None
-
-        delete_shm((self.shm_id,)); self.shm_id = None
-        delete_sem((self.sema1_fn,)); self.sema1_fn = None
-        delete_sem((self.sema2_fn,)); self.sema2_fn = None
+        if self.resource_owner == get_id():
+            if self.shm_ptr:
+                detach_shm((self.shm_ptr, ))
+                self.shm_ptr = None
+            if self.shm_id:
+                delete_shm((self.shm_id,))
+                self.shm_id = None
+            if self.sema1_ptr:
+                detach_sem((self.sema1_ptr, ))
+                self.sema1_ptr = None
+            if self.sema1_fn:
+                delete_sem((self.sema1_fn,))
+                self.sema1_fn = None
+            if self.sema2_ptr:
+                detach_sem((self.sema2_ptr, ))
+                self.sema2_ptr = None
+            if self.sema2_fn:
+                delete_sem((self.sema2_fn,))
+                self.sema2_fn = None
 
 class BPipe(connection):
-    def __init__(self, minimum_write=64, size=2 ** 25):
+    def __init__(self, minimum_write, size):
         self.pipe_1 = SPipe(minimum_write, size)
         self.pipe_2 = SPipe(minimum_write, size)
         self.is_init = False
@@ -137,7 +149,7 @@ class BPipe(connection):
         self.send_bytes(pickle.dumps(item))
     
 
-def Pipe(duplex : bool = True, minimum_write : int = 64, size : int = 2 ** 25) -> Tuple[connection, connection]:
+def Pipe(duplex : bool = True, minimum_write : int = 64, size : int = 2 ** 16) -> Tuple[connection, connection]:
     assert minimum_write <= size
     if duplex:
         pipe_1 = BPipe(minimum_write, size)
