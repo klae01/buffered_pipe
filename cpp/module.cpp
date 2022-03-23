@@ -1,4 +1,4 @@
-#pragma GCC optimize("O2")
+#pragma GCC optimize("O3")
 
 #include <Python.h>
 
@@ -7,7 +7,6 @@
 #include <sys/types.h>
 #include <semaphore.h>
 #include <string.h>
-#include <deque>
 
 const int LENGTH_INFO = 4;
 typedef long long OP_TYPE;
@@ -100,15 +99,19 @@ BASE_TYPE read_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE
     return pointer + length;
 }
 
-BASE_TYPE read_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE length, std::deque<PyObject*>&result) {
+inline void PyList_Append_(PyObject* list, PyObject* item) {
+    PyList_Append(list, item);
+    Py_DECREF(item);
+}
+BASE_TYPE read_request(char* shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE length, PyObject* result) {
     OP_TYPE lookup = 0;
     if(shm_size < pointer + length) {
         lookup = shm_size - pointer;
-        if(lookup) result.push_back(PyBytes_FromStringAndSize(shm_buf + pointer, lookup));
+        if(lookup) PyList_Append_(result, PyBytes_FromStringAndSize(shm_buf + pointer, lookup));
         length -= lookup;
         pointer = 0;
     }
-    if(length) result.push_back(PyBytes_FromStringAndSize(shm_buf + pointer, length));
+    if(length) PyList_Append_(result, PyBytes_FromStringAndSize(shm_buf + pointer, length));
     return pointer + length;
 }
 
@@ -154,10 +157,6 @@ BASE_TYPE chunk_size(char *shm_buf, OP_TYPE shm_size, OP_TYPE pointer) {
     return i2c_value.v;
 }
 
-BASE_TYPE abs_chunk_size(char *shm_buf, OP_TYPE shm_size, OP_TYPE pointer) {
-    return std::abs(chunk_size(shm_buf, shm_size, pointer));
-}
-
 BASE_TYPE write_int(char *shm_buf, OP_TYPE shm_size, OP_TYPE pointer, OP_TYPE value) {
     int2char i2c_value;
     i2c_value.v = value;
@@ -180,7 +179,7 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
     sem_t *sem_a = (sem_t*)LL2PTR(_sem_a), *sem_f = (sem_t*)LL2PTR(_sem_f);
 
     int FLAG = true;
-    std::deque<PyObject*> result;
+    PyObject* result = PyList_New(0);
     BASE_TYPE length, remain;
     while(FLAG) {
         if(sem_trywait(sem_a)) {
@@ -198,10 +197,7 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
 
         sem_post(sem_f);
     }
-    PyObject *return_list = PyList_New(result.size());
-    int index = 0;
-    for(auto&I:result) PyList_SetItem(return_list, index++, I);
-    return Py_BuildValue("LO", pointer, return_list);
+    return Py_BuildValue("LO", pointer, result);
 }
 
 PyObject* send_bytes(PyObject *, PyObject *args) {
@@ -215,20 +211,20 @@ PyObject* send_bytes(PyObject *, PyObject *args) {
     char* shm_buf = (char*)LL2PTR(_shm_buf);
     sem_t *sem_a = (sem_t*)LL2PTR(_sem_a), *sem_f = (sem_t*)LL2PTR(_sem_f);
     
-    OP_TYPE critical_length, write_length, free_length, loop_end_condition;
+    OP_TYPE critical_length, write_length, free_length, minimum_length;
     while(req_len) {
         critical_length = req_len + LENGTH_INFO;
+        minimum_length = std::min((OP_TYPE)minimum_write, critical_length);
         while(margin < critical_length && !sem_trywait(sem_f)) {
-            free_length = LENGTH_INFO + abs_chunk_size(shm_buf, shm_size, pointer_f);
+            free_length = LENGTH_INFO + std::abs(chunk_size(shm_buf, shm_size, pointer_f));
             margin += free_length;
             pointer_f = (pointer_f + free_length) % shm_size;
         }
-        loop_end_condition = std::min((OP_TYPE)minimum_write, critical_length);
-        while(margin < loop_end_condition) {
+        while(margin < minimum_length) {
             Py_BEGIN_ALLOW_THREADS 
             sem_wait(sem_f);
             Py_END_ALLOW_THREADS 
-            free_length = LENGTH_INFO + abs_chunk_size(shm_buf, shm_size, pointer_f);
+            free_length = LENGTH_INFO + std::abs(chunk_size(shm_buf, shm_size, pointer_f));
             margin += free_length;
             pointer_f = (pointer_f + free_length) % shm_size;
         }
