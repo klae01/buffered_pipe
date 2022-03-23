@@ -54,13 +54,13 @@ class SPipe(connection):
             self.shm_size = size
 
             self.shm_id = create_shm((self.shm_size,))
-            print("shm_id", self.shm_id)
+            # print("shm_id", self.shm_id)
 
             sema_fn_base = f"BP_{getpid()}_{id(self)}"
             self.sema1_fn = _random_sema_create(sema_fn_base + "_1_{}.sema")
             self.sema2_fn = _random_sema_create(sema_fn_base + "_2_{}.sema")
-            print(self.sema1_fn)
-            print(self.sema2_fn)
+            # print(self.sema1_fn)
+            # print(self.sema2_fn)
 
             self.shm_ptr = None
             self.sema1_ptr = None
@@ -86,7 +86,7 @@ class SPipe(connection):
     def init(self):
         current_id = getpid()
         if self.resource_owner != current_id:
-            print("SPIPE ID", current_id)
+            # print("SPIPE ID", current_id)
             self.resource_owner = current_id
             assert self.mode is not None
 
@@ -94,9 +94,9 @@ class SPipe(connection):
             self.sema1_ptr = attach_sem((self.sema1_fn,))
             self.sema2_ptr = attach_sem((self.sema2_fn,))
 
-            print("shm_ptr:", self.shm_ptr)
-            print("sem1_ptr:", self.sema1_ptr)
-            print("sem2_ptr:", self.sema2_ptr)
+            # print("shm_ptr:", self.shm_ptr)
+            # print("sem1_ptr:", self.sema1_ptr)
+            # print("sem2_ptr:", self.sema2_ptr)
 
     def recv_bytes(self):
         # shm_buf, shm_size, sem_a, sem_f, pointer
