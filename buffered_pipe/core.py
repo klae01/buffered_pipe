@@ -28,7 +28,7 @@ class SPipe(connection):
 
     def recv_bytes(self):
         self.fd_pipe, result = recv_bytes(self.fd_pipe)
-        return result
+        return b''.join(result)
 
     def send_bytes(self, data):
         self.fd_pipe = send_bytes((self.fd_pipe, data))
@@ -71,7 +71,7 @@ class BPipe(connection):
 
 
 def Pipe(
-    duplex: bool = True, minimum_write: int = 64, size: int = 2 ** 16
+    duplex: bool = True, minimum_write: int = 64, size: int = 2 ** 6
 ) -> Tuple[connection, connection]:
     assert minimum_write <= size
     if duplex:
