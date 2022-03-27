@@ -2,6 +2,7 @@
 
 #include <Python.h>
 
+#include <algorithm>
 #include <fcntl.h>
 #include <sys/shm.h>
 #include <sys/types.h>
