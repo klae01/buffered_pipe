@@ -71,7 +71,7 @@ class BPipe(connection):
 
 
 def Pipe(
-    duplex: bool = True, minimum_write: int = 64, size: int = 2 ** 6
+    duplex: bool = True, minimum_write: int = 64, size: int = 2 ** 16
 ) -> Tuple[connection, connection]:
     assert minimum_write <= size
     if duplex:
