@@ -266,7 +266,7 @@ static PyModuleDef module = {
     PyModuleDef_HEAD_INIT,
     "module",                                // Module name to use with Python import statements
     "Buffered pipe through shared memory",  // Module description
-    -1,
+    0,
     methods                                 // Structure that defines the methods of the module
 };
  
