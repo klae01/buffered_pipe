@@ -1,4 +1,4 @@
-#pragma GCC optimize("O3")
+#pragma GCC optimize("Ofast")
 
 #include <Python.h>
 
@@ -8,11 +8,6 @@
 #include <sys/types.h>
 #include <semaphore.h>
 #include <string.h>
-
-typedef uintptr_t PTR_TYPE;
-
-#define PTR2LL(x) (long long)(uintptr_t)(x)
-#define LL2PTR(x) (void *)(uintptr_t)(x)
 
 // init, free
 // recv_bytes, send_bytes
@@ -85,8 +80,10 @@ PyObject* free(PyObject *, PyObject* args) {
     // 0: shm size-> shared memory ids
     // 1: pipe id -> info ptr, buf ptr
     Pipe pipe;
-    memcpy(&pipe, PyByteArray_AsString(args), sizeof(Pipe));
-    // PyArg_ParseTuple(args, "y", (char*)&pipe);
+    char*      pipe_bytes;
+    Py_ssize_t pipe_len = 0;
+    PyBytes_AsStringAndSize(args, &pipe_bytes, &pipe_len);
+    memcpy(&pipe, pipe_bytes, sizeof(Pipe));
     shmdt(pipe.shm_buf);
     shmctl(pipe.info->buf_id , IPC_RMID , NULL);
     shmdt(pipe.info);
