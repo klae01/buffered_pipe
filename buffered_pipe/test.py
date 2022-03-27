@@ -1,4 +1,4 @@
-import buffered_pipe
+from . import Pipe
 import multiprocessing
 import time
 import threading
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     virtural_method = multiprocessing.Process
 
     cnt = 100000
-    pipe_r, pipe_w = buffered_pipe.Pipe(False, minimum_write=32, size = 2**20)
+    pipe_r, pipe_w = Pipe(False, minimum_write=32, size = 2**20)
     queue = multiprocessing.Queue()
     P = virtural_method(target=f, args = (pipe_w, queue, cnt))
 
