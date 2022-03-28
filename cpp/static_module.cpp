@@ -82,10 +82,10 @@ PyObject* recv_bytes(PyObject *, PyObject* args) {
     Pipe pipe;
     char*      pipe_bytes;
     Py_ssize_t pipe_len = 0;
-    char* pointer = (char*) pipe.info + sizeof(Pipe_info);
     PyBytes_AsStringAndSize(args, &pipe_bytes, &pipe_len);
     memcpy(&pipe, pipe_bytes, sizeof(Pipe));
     mp_request_init(pipe);
+    char* pointer = (char*) pipe.info + sizeof(Pipe_info);
     Pipe_info &info = *(Pipe_info*)pipe.info;
 
     if(sem_trywait(&info.sem_a)) {
@@ -110,11 +110,11 @@ PyObject* send_bytes(PyObject *, PyObject *args) {
     char*      req_data;
     Py_ssize_t pipe_len = 0;
     Py_ssize_t req_len = 0;
-    char* pointer = (char*) pipe.info + sizeof(Pipe_info);
     PyArg_ParseTuple(args, "y#y#", &pipe_bytes, &pipe_len, &req_data, &req_len);
     memcpy((char*) &pipe, pipe_bytes, sizeof(Pipe));
     mp_request_init(pipe);
     Pipe_info &info = *(Pipe_info*)pipe.info;
+    char* pointer = (char*) pipe.info + sizeof(Pipe_info);
     assert(info.obj_size == req_len);
 
     if(sem_trywait(&info.sem_f)) {
