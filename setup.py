@@ -95,7 +95,8 @@ class UploadCommand(Command):
         sys.exit()
 
 ext_modules = [
-    Extension('buffered_pipe.module', sources = ['cpp/module.cpp'])
+    Extension('buffered_pipe.generic_module', sources = ['cpp/generic_module.cpp']), 
+    Extension('buffered_pipe.static_module', sources = ['cpp/static_module.cpp'])
 ]
 
 # Where the magic happens:
