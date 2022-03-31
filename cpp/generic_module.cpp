@@ -44,7 +44,7 @@ void mp_request_init(Pipe &pipe) {
     }
 }
 
-PyObject* init(PyObject *, PyObject* args) {
+PyObject* __init(PyObject *, PyObject* args) {
     Pipe pipe;
     unsigned int minimum_write, shm_size;
     PyArg_ParseTuple(args, "II", &minimum_write, &shm_size);
@@ -74,9 +74,7 @@ PyObject* init(PyObject *, PyObject* args) {
     return PyBytes_FromStringAndSize((char*) &pipe, sizeof(Pipe));
 }
 
-PyObject* free(PyObject *, PyObject* args) {
-    // 0: shm size-> shared memory ids
-    // 1: pipe id -> info ptr, buf ptr
+PyObject* __free(PyObject *, PyObject* args) {
     Pipe pipe;
     char*      pipe_bytes;
     Py_ssize_t pipe_len = 0;
@@ -242,8 +240,8 @@ PyObject* send_bytes(PyObject *, PyObject *args) {
 static PyMethodDef methods[] = {
     // The first property is the name exposed to Python, fast_tanh, the second is the C++
     // function name that contains the implementation.
-    { "init", (PyCFunction)init, METH_O, nullptr },
-    { "free", (PyCFunction)free, METH_O, nullptr },
+    { "init", (PyCFunction)__init, METH_O, nullptr },
+    { "free", (PyCFunction)__free, METH_O, nullptr },
     { "recv_bytes", (PyCFunction)recv_bytes, METH_O, nullptr },
     { "send_bytes", (PyCFunction)send_bytes, METH_O, nullptr },
  

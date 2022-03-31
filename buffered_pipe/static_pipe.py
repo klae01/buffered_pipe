@@ -11,11 +11,10 @@ class _Pipe:
         self.send = self.send_bytes
 
     def recv_bytes(self) -> bytes:
-        self.fd_pipe, result = recv_bytes(self.fd_pipe)
-        return result
+        return recv_bytes(self.fd_pipe)
 
     def send_bytes(self, data: bytes) -> None:
-        self.fd_pipe = send_bytes((self.fd_pipe, data))
+        send_bytes((self.fd_pipe, data))
 
     def __del__(self):
         if self.fd_pipe:

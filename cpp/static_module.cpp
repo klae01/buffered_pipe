@@ -2,16 +2,43 @@
 
 #include <Python.h>
 
-#include <algorithm>
 #include <fcntl.h>
 #include <sys/shm.h>
 #include <sys/types.h>
 #include <semaphore.h>
 #include <string.h>
 #include <assert.h>
+#include <stddef.h>
+
 
 // init, free
 // recv_bytes, send_bytes
+
+// #define DEBUG
+
+#ifdef DEBUG
+#include <algorithm>
+#include <chrono>
+#define pipe_timer_data long long time_save[10]; 
+#define local_timer_init std::vector<std::chrono::high_resolution_clock::time_point> time_save; time_save.reserve(10);
+#define collect_time time_save.push_back(std::chrono::high_resolution_clock::now()); 
+#define update_time(pipe) \
+for(int i = 1 ; i < time_save.size(); i++) \
+    pipe->time_save[i] += std::chrono::duration_cast<std::chrono::nanoseconds>(time_save[i] - time_save[i-1]).count(); 
+#define show_time_spend(pipe) \
+printf("free %u\n", pipe->info_id); \
+for(int i = 0;i < 10; i ++) \
+    if(pipe->time_save[i]) \
+        printf("%d : %lld\n", i, pipe->time_save[i]);
+#else 
+#define pipe_timer_data
+#define local_timer_init 
+#define collect_time
+#define update_time(pipe)
+#define show_time_spend(pipe)
+#endif
+
+const unsigned int PyBytesObject_SIZE = offsetof(PyBytesObject, ob_sval) + 1;
 
 struct Pipe_info {
     // placed on shared memory
@@ -29,6 +56,7 @@ struct Pipe {
     
     unsigned int info_id;
     pid_t pid;
+pipe_timer_data
 };
 
 void mp_request_init(Pipe &pipe) {
@@ -39,11 +67,12 @@ void mp_request_init(Pipe &pipe) {
     }
 }
 
-PyObject* init(PyObject *, PyObject* args) {
+PyObject* __init(PyObject *, PyObject* args) {
     unsigned int obj_size, obj_cnt;
     PyArg_ParseTuple(args, "II", &obj_size, &obj_cnt);
 
     Pipe pipe;
+    memset(&pipe, 0, sizeof(Pipe));
     pipe.info_id = shmget(IPC_PRIVATE, sizeof(Pipe_info) + obj_size * obj_cnt, IPC_CREAT | 0644);
     pipe.info = shmat(pipe.info_id, NULL, 0);
     memset(pipe.info, 0, sizeof(Pipe_info));
@@ -65,79 +94,101 @@ PyObject* init(PyObject *, PyObject* args) {
     return PyBytes_FromStringAndSize((char*) &pipe, sizeof(Pipe));
 }
 
-PyObject* free(PyObject *, PyObject* args) {
-    // 0: shm size-> shared memory ids
-    // 1: pipe id -> info ptr, buf ptr
-    Pipe pipe;
-    char*      pipe_bytes;
-    Py_ssize_t pipe_len = 0;
-    PyBytes_AsStringAndSize(args, &pipe_bytes, &pipe_len);
-    memcpy(&pipe, pipe_bytes, sizeof(Pipe));
-    shmdt(pipe.info);
-    shmctl(pipe.info_id , IPC_RMID , NULL);
+PyObject* __free(PyObject *, PyObject* args) {
+    Py_buffer pipe_obj;
+    PyObject_GetBuffer(args, &pipe_obj, PyBUF_SIMPLE);
+    Pipe *pipe = (Pipe*)pipe_obj.buf;
+show_time_spend(pipe)
+    shmdt(pipe->info);
+    shmctl(pipe->info_id , IPC_RMID , NULL);
+    PyBuffer_Release(&pipe_obj);
     Py_RETURN_NONE;
 }
 
 PyObject* recv_bytes(PyObject *, PyObject* args) {
-    Pipe pipe;
-    char*      pipe_bytes;
-    Py_ssize_t pipe_len = 0;
-    PyBytes_AsStringAndSize(args, &pipe_bytes, &pipe_len);
-    memcpy(&pipe, pipe_bytes, sizeof(Pipe));
-    mp_request_init(pipe);
-    char* pointer = (char*) pipe.info + sizeof(Pipe_info);
-    Pipe_info &info = *(Pipe_info*)pipe.info;
+local_timer_init
+collect_time
+    Py_buffer pipe_obj;
+    PyObject_GetBuffer(args, &pipe_obj, PyBUF_SIMPLE);
+    Pipe *pipe = (Pipe*)pipe_obj.buf;
+    mp_request_init(*pipe);
+    char* pointer = (char*) pipe->info + sizeof(Pipe_info);
+    Pipe_info &info = *(Pipe_info*)pipe->info;
 
+    // PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + info.obj_size);
+    // PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, info.obj_size);
+
+collect_time
     if(sem_trywait(&info.sem_a)) {
-        Py_BEGIN_ALLOW_THREADS 
+        Py_BEGIN_ALLOW_THREADS
         sem_wait(&info.sem_a);
         Py_END_ALLOW_THREADS 
     }
-    pthread_mutex_lock(&info.mutex_r);
+collect_time
+    if(pthread_mutex_trylock(&info.mutex_r)) {
+        Py_BEGIN_ALLOW_THREADS
+        pthread_mutex_lock(&info.mutex_r);
+        Py_END_ALLOW_THREADS 
+    }
     pointer += info.pointer_f * info.obj_size;
     if(++info.pointer_f == info.obj_cnt)
         info.pointer_f = 0;
     pthread_mutex_unlock(&info.mutex_r);
+collect_time
 
     PyObject* result = PyBytes_FromStringAndSize(pointer, info.obj_size);
+    // PyObject* result = PyByteArray_FromStringAndSize(pointer, info.obj_size);
+    // memcpy(result->ob_sval, pointer, info.obj_size);
     sem_post(&info.sem_f);
-    return Py_BuildValue("y#O", &pipe, sizeof(Pipe), result);
+    PyBuffer_Release(&pipe_obj);
+collect_time
+update_time(pipe)
+    return (PyObject *)result;
 }
 
 PyObject* send_bytes(PyObject *, PyObject *args) {
-    Pipe pipe;
-    char*      pipe_bytes;
-    char*      req_data;
-    Py_ssize_t pipe_len = 0;
-    Py_ssize_t req_len = 0;
-    PyArg_ParseTuple(args, "y#y#", &pipe_bytes, &pipe_len, &req_data, &req_len);
-    memcpy((char*) &pipe, pipe_bytes, sizeof(Pipe));
-    mp_request_init(pipe);
-    Pipe_info &info = *(Pipe_info*)pipe.info;
-    char* pointer = (char*) pipe.info + sizeof(Pipe_info);
-    assert(info.obj_size == req_len);
-
+local_timer_init
+collect_time
+    Py_buffer pipe_obj, data_obj;
+    PyArg_ParseTuple(args, "y*y*", &pipe_obj, &data_obj);
+    Pipe *pipe = (Pipe*)pipe_obj.buf;
+    mp_request_init(*pipe);
+    char* pointer = (char*) pipe->info + sizeof(Pipe_info);
+    Pipe_info &info = *(Pipe_info*)pipe->info;
+    assert(info.obj_size == data_obj.len);
+    
+collect_time
     if(sem_trywait(&info.sem_f)) {
         Py_BEGIN_ALLOW_THREADS 
         sem_wait(&info.sem_f);
         Py_END_ALLOW_THREADS 
     }
-    pthread_mutex_lock(&info.mutex_w);
+collect_time
+    if(pthread_mutex_trylock(&info.mutex_w)) {
+        Py_BEGIN_ALLOW_THREADS
+        pthread_mutex_lock(&info.mutex_w);
+        Py_END_ALLOW_THREADS 
+    }
     pointer += info.pointer_a * info.obj_size;
     if(++info.pointer_a == info.obj_cnt)
         info.pointer_a = 0;
     pthread_mutex_unlock(&info.mutex_w);
+collect_time
 
-    memmove(pointer, req_data, req_len);
+    memcpy(pointer, data_obj.buf, info.obj_size);
     sem_post(&info.sem_a);
-    return PyBytes_FromStringAndSize((char*) &pipe, sizeof(Pipe));
+    PyBuffer_Release(&pipe_obj);
+    PyBuffer_Release(&data_obj);
+collect_time
+update_time(pipe)
+    Py_RETURN_NONE;
 }
 
 static PyMethodDef methods[] = {
     // The first property is the name exposed to Python, fast_tanh, the second is the C++
     // function name that contains the implementation.
-    { "init", (PyCFunction)init, METH_O, nullptr },
-    { "free", (PyCFunction)free, METH_O, nullptr },
+    { "init", (PyCFunction)__init, METH_O, nullptr },
+    { "free", (PyCFunction)__free, METH_O, nullptr },
     { "recv_bytes", (PyCFunction)recv_bytes, METH_O, nullptr },
     { "send_bytes", (PyCFunction)send_bytes, METH_O, nullptr },
  
