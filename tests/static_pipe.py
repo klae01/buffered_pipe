@@ -232,7 +232,10 @@ class Type_0(unittest.TestCase):
             TestCase_SPSC.test_all(128, 10000, 1024, seed, self)
     def test_small6(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(1024, 10000, 4, seed, self)
+            TestCase_SPSC.test_all(2**10, 2**10, 4, seed, self)
+    def test_small7(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            TestCase_SPSC.test_all(2**16, 2**4, 4, seed, self)
 
 class TestCase_MPMC:
     mtmc_seed = 0
