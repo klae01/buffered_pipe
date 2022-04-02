@@ -52,7 +52,7 @@ struct Pipe_info {
 
 struct Pipe {
     // placed on private memory, save on python
-    void *info; // info with buffer
+    void *info; // Cached attached shared memory address
     
     unsigned int info_id;
     pid_t pid;
@@ -86,6 +86,7 @@ PyObject* __init(PyObject *, PyObject* args) {
 
     pthread_mutexattr_t psharedm;
     pthread_mutexattr_init(&psharedm);
+    // pthread_mutexattr_setrobust(&psharedm, PTHREAD_MUTEX_ROBUST);
     pthread_mutexattr_setpshared(&psharedm, PTHREAD_PROCESS_SHARED);
     pthread_mutex_init(&info.mutex_w, &psharedm);
     pthread_mutex_init(&info.mutex_r, &psharedm);
@@ -115,8 +116,8 @@ collect_time
     char* pointer = (char*) pipe->info + sizeof(Pipe_info);
     Pipe_info &info = *(Pipe_info*)pipe->info;
 
-    // PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + info.obj_size);
-    // PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, info.obj_size);
+    PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + info.obj_size);
+    PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, info.obj_size);
 
 collect_time
     if(sem_trywait(&info.sem_a)) {
@@ -136,13 +137,13 @@ collect_time
     pthread_mutex_unlock(&info.mutex_r);
 collect_time
 
-    PyObject* result = PyBytes_FromStringAndSize(pointer, info.obj_size);
+    // PyObject* result = PyBytes_FromStringAndSize(pointer, info.obj_size);
     // PyObject* result = PyByteArray_FromStringAndSize(pointer, info.obj_size);
-    // memcpy(result->ob_sval, pointer, info.obj_size);
+    memcpy(result->ob_sval, pointer, info.obj_size);
     sem_post(&info.sem_f);
-    PyBuffer_Release(&pipe_obj);
 collect_time
 update_time(pipe)
+    PyBuffer_Release(&pipe_obj);
     return (PyObject *)result;
 }
 
@@ -177,10 +178,10 @@ collect_time
 
     memcpy(pointer, data_obj.buf, info.obj_size);
     sem_post(&info.sem_a);
-    PyBuffer_Release(&pipe_obj);
-    PyBuffer_Release(&data_obj);
 collect_time
 update_time(pipe)
+    PyBuffer_Release(&data_obj);
+    PyBuffer_Release(&pipe_obj);
     Py_RETURN_NONE;
 }
 
