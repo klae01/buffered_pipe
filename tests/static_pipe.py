@@ -10,33 +10,39 @@ import hashlib
 
 from buffered_pipe import Static_Pipe as Pipe
 
+random_bytes = lambda n: bytes([random.randint(0, 255) for _ in range(n)])
+
 def dataset(length, count):
-    return [random.randbytes(length) for _ in range(count)]
+    return [random_bytes(length) for _ in range(count)]
 
 def producer(pipe, data):
     for I in data:
         pipe.send(I)
 
 def mpmt_producer(pipe, data:list, barrier:multiprocessing.Barrier):
-    print(f"prod reach barrier")
+    # print(f"prod reach barrier", "%x"%threading.current_thread().ident)
     barrier.wait()
-    print(f"prod pass barrier")
+    # print(f"prod pass barrier", "%x"%threading.current_thread().ident)
     for I in data:
+        # time.sleep(0.0004)
         pipe.send(I)
+    # print(f"prod finish")
     # print(f"prod finish with send {len(data)} elements")
 
 def mpmt_consumer(pipe, RTQ:multiprocessing.Queue, finished:bytes, barrier:multiprocessing.Barrier):
-    print(f"cons reach barrier")
+    # print(f"cons reach barrier", "%x"%threading.current_thread().ident)
     barrier.wait()
-    print(f"cons pass barrier")
+    # print(f"cons pass barrier", "%x"%threading.current_thread().ident)
     items = []
     while True:
         data = pipe.recv()
         if data == finished:
             break
         items.append(data)
+    # print(f"cons finish")
     # print(f"cons finish with recv {len(items)} elements")
     RTQ.put(items)
+    # print(f"cons Qin finish")
 
 def type_tester(pipe, data):
     # single prod, single cons
@@ -136,8 +142,17 @@ def joinable_test(Idatas, Odatas):
         
     Idatas = [[hashlib.sha256(J).digest() for J in I] for I in Idatas]
     Odatas = [[hashlib.sha256(J).digest() for J in I] for I in Odatas]
+    Iset = set(itertools.chain.from_iterable(Idatas))
+    Oset = set(itertools.chain.from_iterable(Odatas))
+    if Oset - (Iset & Oset):
+        # recv unsended data
+        return -1
+    if len(Oset) != len(Iset):
+        # unique count do not match
+        return -2
+
     if collections.Counter(itertools.chain.from_iterable(Idatas)) != collections.Counter(itertools.chain.from_iterable(Odatas)):
-        return -123
+        return -3
     return all(_sub(I, Odatas) for I in Idatas)    
 
 
@@ -153,13 +168,14 @@ def type02_tester(pipe, data, num_mp = 0):
 
 def type22_tester(pipe_r, pipe_w, *data, mp_prod = 0, mt_prod = 0, mp_cons = 0, mt_cons = 0, end_Data = None, ctx = None):
     # multi prod, multi cons
-    print(f"mp_prod = {mp_prod} , mt_prod = {mt_prod}, mp_cons = {mp_cons}, mt_cons = {mt_cons}, end_Data = {end_Data} ")
+    print(f"mp_prod = {mp_prod} , mt_prod = {mt_prod}, mp_cons = {mp_cons}, mt_cons = {mt_cons}")#, end_Data = {end_Data} ")
     assert len(data) == mp_prod + mt_prod
 
     ctx = ctx or multiprocessing.get_context()
-    RTQ = ctx.Queue()
+    RTQ = ctx.SimpleQueue()
     prod_barrier = ctx.Barrier(mp_prod + mt_prod)
     cons_barrier = ctx.Barrier(mp_cons + mt_cons)
+    # prod_barrier = cons_barrier = ctx.Barrier(mp_prod + mt_prod + mp_cons + mt_cons)
 
     mp_prods = [ctx.Process(target = mpmt_producer, args = (pipe_w, data[idx], prod_barrier)) for idx in range(mp_prod)]
     mt_prods = [threading.Thread(target = mpmt_producer, args = (pipe_w, data[mp_prod + idx], prod_barrier)) for idx in range(mt_prod)]
@@ -178,11 +194,13 @@ def type22_tester(pipe_r, pipe_w, *data, mp_prod = 0, mt_prod = 0, mp_cons = 0, 
     print("cons finish final data send")        
     for MPMT in itertools.chain(mp_conss, mt_conss):
         pipe_w.send(end_Data)
-    print("cons join and collect")   
+    print("cons collect")   
     results = []
     for MPMT in itertools.chain(mp_conss, mt_conss):
-        MPMT.join()
         results.append(RTQ.get())
+    print("cons join")   
+    for MPMT in itertools.chain(mp_conss, mt_conss):
+        MPMT.join()
     print("joinable result")  
     # print('\n----------------\n', data, '\n', results, '\n=============\n')
     print(f"\n----------------\n {[len(I) for I in data]} \n {[len(I) for I in results]} \n=============\n")
@@ -267,6 +285,8 @@ class MPMC_TestCase:
 
         mp_cons = random.choice([0, 1, 2])
         mt_cons = random.choice([0, 1, 2][(mp_cons == 0):])
+        # mp_cons = random.choice([0, 1])
+        # mt_cons = mp_cons == 0
 
         result = type22_tester(pipe_r, pipe_w, *data, mp_prod = mp_prod, mt_prod = mt_prod, mp_cons = mp_cons, mt_cons = mt_cons, end_Data = end_Data, ctx = ctx)
         MPMC_TestCase.spend_time[type(ctx).__name__] += time.time()
@@ -282,9 +302,9 @@ class MPMC_TestCase:
 
         MPMC_TestCase.spend_time['search unused'] -= time.time()
         data_hashes = set(hashlib.sha256(I).digest() for I in itertools.chain.from_iterable(data))
-        end_Data = random.randbytes(length)
+        end_Data = random_bytes(length)
         while hashlib.sha256(end_Data).digest() in data_hashes:
-            end_Data = random.randbytes(length)
+            end_Data = random_bytes(length)
         MPMC_TestCase.spend_time['search unused'] += time.time()
 
         utc.assertEqual(TC.run_test(data, end_Data = end_Data, ctx = multiprocessing.get_context("fork")), True)
@@ -298,18 +318,18 @@ class Type_MPMC(unittest.TestCase):
     def test_small2(self):
         for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
             MPMC_TestCase.test_all(4, (10, 100), chunk_count % 4 + 1, 4, seed, self)
-    # def test_small3(self):
-    #     for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-    #         MPMC_TestCase.test_all(4, (1, 100), chunk_count % 4 + 1, 4, seed, self)
-    # def test_small4(self):
-    #     for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-    #         MPMC_TestCase.test_all(128, (1, 50), chunk_count % 4 + 1, 4, seed, self)
-    # def test_small5(self):
-    #     for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-    #         MPMC_TestCase.test_all(128, (0, 50), chunk_count % 4 + 1, 1024, seed, self)
-    # def test_small6(self):
-    #     for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-    #         MPMC_TestCase.test_all(1024, (0, 50), chunk_count % 4 + 1, 4, seed, self)
+    def test_small3(self):
+        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
+            MPMC_TestCase.test_all(4, (1, 100), chunk_count % 4 + 1, 4, seed, self)
+    def test_small4(self):
+        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
+            MPMC_TestCase.test_all(128, (1, 50), chunk_count % 4 + 1, 4, seed, self)
+    def test_small5(self):
+        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
+            MPMC_TestCase.test_all(128, (0, 50), chunk_count % 4 + 1, 1024, seed, self)
+    def test_small6(self):
+        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
+            MPMC_TestCase.test_all(1024, (0, 50), chunk_count % 4 + 1, 4, seed, self)
 
 if __name__ == '__main__':
     try:
