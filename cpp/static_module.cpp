@@ -44,8 +44,8 @@ struct Pipe_info {
     // placed on shared memory
     unsigned int obj_size;
     unsigned int obj_cnt;
-    unsigned int pointer_a;
-    unsigned int pointer_f;
+    volatile unsigned int pointer_a;
+    volatile unsigned int pointer_f;
     sem_t sem_a, sem_f;
     pthread_mutex_t mutex_w, mutex_r;
 };
