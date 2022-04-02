@@ -10,7 +10,7 @@ import hashlib
 
 from buffered_pipe import Static_Pipe as Pipe
 
-random_bytes = lambda n: bytes([random.randint(0, 255) for _ in range(n)])
+random_bytes = lambda n: bytes(random.randint(0, 255) for _ in range(n))
 
 def dataset(length, count):
     return [random_bytes(length) for _ in range(count)]
@@ -51,40 +51,6 @@ def type_tester(pipe, data):
         if exp != ret:
             raise Exception(f"{exp} !=  {ret} at {idx}")
     return True
-
-def joinable_test(result, *data):
-    lookup = set([0] * len(data))
-    for step, ret in enumerate(result):
-        lookup, prev_lookup = set(), lookup
-        for I in prev_lookup:
-            for i, I in enumerate(I):
-                if len(data[i]) < I and data[i][I] == ret:
-                    lup = copy.copy(I)
-                    lup[i] = I + 1
-                    lookup.add(lup)
-        if len(lookup) == 0:
-            raise Exception(f"len(lookup) = {len(lookup)} at {step}")
-    assert step + 1 == sum(map(len, data))
-    return len(lookup) > 0
-
-def joinable_test(Idatas, Odatas):
-    lookup = set([([0] * len(Idatas), [0] * len(Odatas))])
-    assert sum(map(len, Idatas)) == sum(map(len, Odatas))
-    for step in range(sum(map(len, Idatas))):
-        lookup, prev_lookup = set(), lookup
-        for I_up, O_up in prev_lookup:
-            for i, I in enumerate(I_up):
-                if len(Idatas[i]) < I:
-                    I_nxt = copy.copy(I_up)
-                    I_nxt[i] += 1
-                    for j, J in enumerate(O_up):
-                        if len(Odatas[j]) < J and Idatas[i][I] == Odatas[j][J]:
-                            O_nxt = copy.copy(O_up)
-                            O_nxt[i] += 1
-                            lookup.add((I_nxt, O_nxt))
-        if len(lookup) == 0:
-            raise Exception(f"len(lookup) = {len(lookup)} at {step}")
-    return len(lookup) > 0
 
 def joinable_test(Idatas, Odatas):
     # 1. count
@@ -157,12 +123,12 @@ def joinable_test(Idatas, Odatas):
 
 
 def type20_tester(pipe, *data, num_mp = 0):
-    # multi prod, main cons
+    # multi prod, main thread cons
     ...
     return joinable_test((pipe.recv() for _ in range(sum(map(len, data)))), *data)
 
 def type02_tester(pipe, data, num_mp = 0):
-    # main prod, multi cons
+    # main thread prod, multi cons
     ...
     return joinable_test((pipe.recv() for _ in range(sum(map(len, data)))), *data)
 
@@ -212,7 +178,7 @@ def type22_tester(pipe_r, pipe_w, *data, mp_prod = 0, mt_prod = 0, mp_cons = 0, 
 
     return R
 
-class TestCase:
+class TestCase_SPSC:
     spend_time = collections.defaultdict(float)
     def __init__(self, length, count, buf_size, seed):
         self.length = length
@@ -220,55 +186,55 @@ class TestCase:
         self.buf_size = buf_size
         self.seed = seed
     def mp_test(self, data, ctx = multiprocessing.get_context()):
-        TestCase.spend_time[type(ctx).__name__] -= time.time()
+        TestCase_SPSC.spend_time[type(ctx).__name__] -= time.time()
         pipe_r, pipe_w = Pipe(self.length, self.buf_size)
         P = ctx.Process(target = producer, args = (pipe_w, data))
         P.start()
         result = type_tester(pipe_r, data)
-        TestCase.spend_time[type(ctx).__name__] += time.time()
+        TestCase_SPSC.spend_time[type(ctx).__name__] += time.time()
         return result
     def mt_test(self, data):
-        TestCase.spend_time['threading'] -= time.time()
+        TestCase_SPSC.spend_time['threading'] -= time.time()
         pipe_r, pipe_w = Pipe(self.length, self.buf_size)
         P = threading.Thread(target = producer, args = (pipe_w, data))
         P.start()
-        TestCase.spend_time['threading'] += time.time()
+        TestCase_SPSC.spend_time['threading'] += time.time()
         return type_tester(pipe_r, data)
     @classmethod
     def test_all(cls, length, count, buf_size, seed, utc):
         TC = cls(length, count, buf_size, seed)
 
-        TestCase.spend_time['data gen'] -= time.time()
+        TestCase_SPSC.spend_time['data gen'] -= time.time()
         random.seed(seed)
         data = dataset(length, count)
-        TestCase.spend_time['data gen'] += time.time()
+        TestCase_SPSC.spend_time['data gen'] += time.time()
 
         utc.assertEqual(TC.mp_test(data, ctx = multiprocessing.get_context("fork")), True)
         utc.assertEqual(TC.mp_test(data, ctx = multiprocessing.get_context("spawn")), True)
         utc.assertEqual(TC.mp_test(data, ctx = multiprocessing.get_context("forkserver")), True)
         utc.assertEqual(TC.mt_test(data), True)
 
-class Type1(unittest.TestCase):
+class Type_0(unittest.TestCase):
     def test_small1(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase.test_all(4, 10000, 1, seed, self)
+            TestCase_SPSC.test_all(4, 10000, 1, seed, self)
     def test_small2(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase.test_all(4, 10000, 2, seed, self)
+            TestCase_SPSC.test_all(4, 10000, 2, seed, self)
     def test_small3(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase.test_all(4, 10000, 4, seed, self)
+            TestCase_SPSC.test_all(4, 10000, 4, seed, self)
     def test_small4(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase.test_all(128, 10000, 4, seed, self)
+            TestCase_SPSC.test_all(128, 10000, 4, seed, self)
     def test_small5(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase.test_all(128, 10000, 1024, seed, self)
+            TestCase_SPSC.test_all(128, 10000, 1024, seed, self)
     def test_small6(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase.test_all(1024, 10000, 4, seed, self)
+            TestCase_SPSC.test_all(1024, 10000, 4, seed, self)
 
-class MPMC_TestCase:
+class TestCase_MPMC:
     mtmc_seed = 0
     spend_time = collections.defaultdict(float)
     def __init__(self, length, buf_size, seed):
@@ -276,10 +242,10 @@ class MPMC_TestCase:
         self.buf_size = buf_size
         self.seed = seed
     def run_test(self, data, end_Data, ctx = multiprocessing.get_context()):
-        MPMC_TestCase.spend_time[type(ctx).__name__] -= time.time()
+        TestCase_MPMC.spend_time[type(ctx).__name__] -= time.time()
         pipe_r, pipe_w = Pipe(self.length, self.buf_size)
-        random.seed(MPMC_TestCase.mtmc_seed)
-        MPMC_TestCase.mtmc_seed += 1
+        random.seed(TestCase_MPMC.mtmc_seed)
+        TestCase_MPMC.mtmc_seed += 1
         mp_prod = random.randrange(0, len(data))
         mt_prod = len(data) - mp_prod
 
@@ -289,54 +255,54 @@ class MPMC_TestCase:
         # mt_cons = mp_cons == 0
 
         result = type22_tester(pipe_r, pipe_w, *data, mp_prod = mp_prod, mt_prod = mt_prod, mp_cons = mp_cons, mt_cons = mt_cons, end_Data = end_Data, ctx = ctx)
-        MPMC_TestCase.spend_time[type(ctx).__name__] += time.time()
+        TestCase_MPMC.spend_time[type(ctx).__name__] += time.time()
         return result
     @classmethod
     def test_all(cls, length, data_size_range, data_count, buf_size, seed, utc):
         TC = cls(length, buf_size, seed)
 
-        MPMC_TestCase.spend_time['data gen'] -= time.time()
+        TestCase_MPMC.spend_time['data gen'] -= time.time()
         random.seed(seed)
         data = [dataset(length, random.randrange(*data_size_range)) for _ in range(data_count)]
-        MPMC_TestCase.spend_time['data gen'] += time.time()
+        TestCase_MPMC.spend_time['data gen'] += time.time()
 
-        MPMC_TestCase.spend_time['search unused'] -= time.time()
+        TestCase_MPMC.spend_time['search unused'] -= time.time()
         data_hashes = set(hashlib.sha256(I).digest() for I in itertools.chain.from_iterable(data))
         end_Data = random_bytes(length)
         while hashlib.sha256(end_Data).digest() in data_hashes:
             end_Data = random_bytes(length)
-        MPMC_TestCase.spend_time['search unused'] += time.time()
+        TestCase_MPMC.spend_time['search unused'] += time.time()
 
         utc.assertEqual(TC.run_test(data, end_Data = end_Data, ctx = multiprocessing.get_context("fork")), True)
         utc.assertEqual(TC.run_test(data, end_Data = end_Data, ctx = multiprocessing.get_context("spawn")), True)
         utc.assertEqual(TC.run_test(data, end_Data = end_Data, ctx = multiprocessing.get_context("forkserver")), True)
 
-class Type_MPMC(unittest.TestCase):
+class Type_3(unittest.TestCase):
     def test_small1(self):
         for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            MPMC_TestCase.test_all(4, (1, 10), chunk_count % 4 + 1, 1, seed, self)
+            TestCase_MPMC.test_all(4, (1, 10), chunk_count % 4 + 1, 1, seed, self)
     def test_small2(self):
         for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            MPMC_TestCase.test_all(4, (10, 100), chunk_count % 4 + 1, 4, seed, self)
+            TestCase_MPMC.test_all(4, (10, 100), chunk_count % 4 + 1, 4, seed, self)
     def test_small3(self):
         for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            MPMC_TestCase.test_all(4, (1, 100), chunk_count % 4 + 1, 4, seed, self)
+            TestCase_MPMC.test_all(4, (1, 100), chunk_count % 4 + 1, 4, seed, self)
     def test_small4(self):
         for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            MPMC_TestCase.test_all(128, (1, 50), chunk_count % 4 + 1, 4, seed, self)
+            TestCase_MPMC.test_all(128, (1, 50), chunk_count % 4 + 1, 4, seed, self)
     def test_small5(self):
         for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            MPMC_TestCase.test_all(128, (0, 50), chunk_count % 4 + 1, 1024, seed, self)
+            TestCase_MPMC.test_all(128, (0, 50), chunk_count % 4 + 1, 1024, seed, self)
     def test_small6(self):
         for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            MPMC_TestCase.test_all(1024, (0, 50), chunk_count % 4 + 1, 4, seed, self)
+            TestCase_MPMC.test_all(1024, (0, 50), chunk_count % 4 + 1, 4, seed, self)
 
 if __name__ == '__main__':
     try:
         unittest.main(exit=False)
     finally:
-        for K, V in TestCase.spend_time.items():
+        for K, V in TestCase_SPSC.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("====================")
-        for K, V in MPMC_TestCase.spend_time.items():
+        for K, V in TestCase_MPMC.spend_time.items():
             print(f"{K} : {V: 4.2f}")
