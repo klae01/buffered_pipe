@@ -139,7 +139,10 @@ collect_time
 
     // PyObject* result = PyBytes_FromStringAndSize(pointer, info.obj_size);
     // PyObject* result = PyByteArray_FromStringAndSize(pointer, info.obj_size);
-    memcpy(result->ob_sval, pointer, info.obj_size);
+    unsigned int len = info.obj_size;
+    char *d_buf = (char *)result->ob_sval;
+    for(volatile char *pt = pointer; len--; *(d_buf++) = *(pt++));
+    // memcpy(result->ob_sval, pointer, info.obj_size);
     sem_post(&info.sem_f);
 collect_time
 update_time(pipe)
@@ -176,7 +179,10 @@ collect_time
     pthread_mutex_unlock(&info.mutex_w);
 collect_time
 
-    memcpy(pointer, data_obj.buf, info.obj_size);
+    unsigned int len = info.obj_size;
+    char *d_buf = (char *)data_obj.buf;
+    for(volatile char *pt = pointer; len--; *(pt++) = *(d_buf++));
+    // memcpy(pointer, data_obj.buf, info.obj_size);
     sem_post(&info.sem_a);
 collect_time
 update_time(pipe)
