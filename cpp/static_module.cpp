@@ -27,7 +27,7 @@
 for(int i = 1 ; i < time_save.size(); i++) \
     pipe->time_save[i] += std::chrono::duration_cast<std::chrono::nanoseconds>(time_save[i] - time_save[i-1]).count(); 
 #define show_time_spend(pipe) \
-printf("free %u\n", pipe->info_id); \
+printf("free %u\n", pipe->shm_fd); \
 for(int i = 0;i < 10; i ++) \
     if(pipe->time_save[i]) \
         printf("%d : %lld\n", i, pipe->time_save[i]);
@@ -46,10 +46,10 @@ const unsigned int PyBytesObject_SIZE = offsetof(PyBytesObject, ob_sval) + 1;
 
 struct Pipe_info {
     // placed on shared memory
-    volatile unsigned int pointer_a;
-    volatile unsigned int pointer_f;
+    unsigned int pointer_a;
+    unsigned int pointer_f;
     sem_t sem_a, sem_f;
-    pthread_mutex_t mutex_a, mutex_f, mutex_m;
+    pthread_mutex_t mutex_a, mutex_f;
 };
 
 struct Pipe {
@@ -97,18 +97,17 @@ PyObject* __init(PyObject *, PyObject* args) {
     pipe.obj_size = obj_size;
     pipe.obj_cnt = obj_cnt;
     pipe.init(fn_obj.buf);
-    Pipe_info &info = *pipe.GET_INFO();
+    Pipe_info *info = pipe.GET_INFO();
 
-    sem_init(&info.sem_a, 1, 0);
-    sem_init(&info.sem_f, 1, pipe.obj_cnt);
+    sem_init(&info->sem_a, 1, 0);
+    sem_init(&info->sem_f, 1, pipe.obj_cnt);
 
     pthread_mutexattr_t psharedm;
     pthread_mutexattr_init(&psharedm);
     pthread_mutexattr_setrobust(&psharedm, PTHREAD_MUTEX_ROBUST);
     pthread_mutexattr_setpshared(&psharedm, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(&info.mutex_a, &psharedm);
-    pthread_mutex_init(&info.mutex_f, &psharedm);
-    pthread_mutex_init(&info.mutex_m, &psharedm);
+    pthread_mutex_init(&info->mutex_a, &psharedm);
+    pthread_mutex_init(&info->mutex_f, &psharedm);
 
     PyBuffer_Release(&fn_obj);
     return PyBytes_FromStringAndSize((char*) &pipe, sizeof(Pipe));
@@ -141,7 +140,6 @@ collect_time
     PyArg_ParseTuple(args, "y*s*", &pipe_obj, &fn_obj);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
     pipe->reinit(fn_obj.buf);
-    char* pointer = pipe->GET_BUF();
     Pipe_info *info = pipe->GET_INFO();
 
 collect_time
@@ -156,14 +154,16 @@ collect_time
         pthread_mutex_lock(&info->mutex_f);
         Py_END_ALLOW_THREADS 
     }
-    pointer += info->pointer_f * pipe->obj_size;
+    msync((void*)&info->pointer_f, sizeof(info->pointer_f), MS_INVALIDATE);
+    void* pointer = pipe->GET_BUF() + info->pointer_f * pipe->obj_size;
     if(++info->pointer_f == pipe->obj_cnt)
         info->pointer_f = 0;
 
     // msync((void*)&info->pointer_f, sizeof(info->pointer_f), MS_ASYNC | MS_INVALIDATE);
+    msync(pointer, pipe->obj_size, MS_INVALIDATE);
     PyObject* result = PyBytes_FromStringAndSize((char *)pointer, pipe->obj_size);
-    sem_post(&info->sem_f);
     msync((void*)&info->pointer_f, sizeof(info->pointer_f), MS_SYNC);
+    sem_post(&info->sem_f);
     pthread_mutex_unlock(&info->mutex_f);
 collect_time
 update_time(pipe)
@@ -179,7 +179,6 @@ collect_time
     PyArg_ParseTuple(args, "y*y*s*", &pipe_obj, &data_obj, &fn_obj);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
     pipe->reinit(fn_obj.buf);
-    char* pointer = pipe->GET_BUF();
     Pipe_info *info = pipe->GET_INFO();
     assert(pipe->obj_size == data_obj.len);
     
@@ -195,7 +194,8 @@ collect_time
         pthread_mutex_lock(&info->mutex_a);
         Py_END_ALLOW_THREADS 
     }
-    pointer += info->pointer_a * pipe->obj_size;
+    msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_INVALIDATE);
+    void* pointer = pipe->GET_BUF() + info->pointer_a * pipe->obj_size;
     if(++info->pointer_a == pipe->obj_cnt)
         info->pointer_a = 0;
 
