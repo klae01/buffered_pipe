@@ -7,10 +7,12 @@ import multiprocessing
 import threading
 import itertools
 import hashlib
+import os
 
 from buffered_pipe import Static_Pipe as Pipe
 
-random_bytes = lambda n: bytes(random.randint(0, 255) for _ in range(n))
+# random_bytes = lambda n: bytes(random.randint(0, 255) for _ in range(n))
+random_bytes = lambda n: os.urandom(n)
 
 def dataset(length, count):
     return [random_bytes(length) for _ in range(count)]
@@ -280,25 +282,25 @@ class TestCase_SPSC:
 class Type_0(unittest.TestCase):
     def test_small1(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(4, 10000, 1, seed, self)
+            TestCase_SPSC.test_all(4, 2**15, 1, seed, self)
     def test_small2(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(4, 10000, 2, seed, self)
+            TestCase_SPSC.test_all(4, 2**15, 2, seed, self)
     def test_small3(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(4, 10000, 4, seed, self)
+            TestCase_SPSC.test_all(4, 2**16, 4, seed, self)
     def test_small4(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(2**7, 2**13, 4, seed, self)
+            TestCase_SPSC.test_all(2**7, 2**14, 4, seed, self)
     def test_small5(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(2**7, 2**13, 1024, seed, self)
+            TestCase_SPSC.test_all(2**7, 2**14, 1024, seed, self)
     def test_small6(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(2**10, 2**10, 4, seed, self)
+            TestCase_SPSC.test_all(2**10, 2**12, 4, seed, self)
     def test_small7(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(2**16, 2**4, 4, seed, self)
+            TestCase_SPSC.test_all(2**16, 2**8, 4, seed, self)
 
 class TestCase_MPMC_base:
     # mtmc_seed = 0
@@ -413,14 +415,14 @@ class Type_2(unittest.TestCase, Test_suite_base):
     prod_cnt_ord = itertools.cycle([1])
     cons_cnt_ord = random_ordered_cycle(1, 5)
     
-# class TestCase_MPMC(TestCase_MPMC_base):
-#     mtmc_seed = 0
-#     spend_time = collections.defaultdict(float)
-#     target_fn = type22_tester
-# class Type_3(unittest.TestCase, Test_suite_base):
-#     target_class = TestCase_MPMC
-#     prod_cnt_ord = random_ordered_cycle(1, 5)
-#     cons_cnt_ord = random_ordered_cycle(1, 5)
+class TestCase_MPMC(TestCase_MPMC_base):
+    mtmc_seed = 0
+    spend_time = collections.defaultdict(float)
+    target_fn = type22_tester
+class Type_3(unittest.TestCase, Test_suite_base):
+    target_class = TestCase_MPMC
+    prod_cnt_ord = random_ordered_cycle(1, 5)
+    cons_cnt_ord = random_ordered_cycle(1, 5)
 
 if __name__ == '__main__':
     try:
