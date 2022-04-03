@@ -122,16 +122,79 @@ def joinable_test(Idatas, Odatas):
     return all(_sub(I, Odatas) for I in Idatas)    
 
 
-def type20_tester(pipe, *data, num_mp = 0):
+def type20_tester(pipe_r, pipe_w, *data, mp_prod = 0, mt_prod = 0, mp_cons = 0, mt_cons = 0, end_Data = None, ctx = None):
+# def type20_tester(pipe_r, pipe_w, *data, mp_prod = 0, mt_prod = 0, ctx = None):
     # multi prod, main thread cons
-    ...
-    return joinable_test((pipe.recv() for _ in range(sum(map(len, data)))), *data)
+    # print(f"mp_prod = {mp_prod} , mt_prod = {mt_prod}")#, end_Data = {end_Data} ")
+    assert len(data) == mp_prod + mt_prod
 
-def type02_tester(pipe, data, num_mp = 0):
+    ctx = ctx or multiprocessing.get_context()
+    prod_barrier = ctx.Barrier(mp_prod + mt_prod)
+
+    mp_prods = [ctx.Process(target = mpmt_producer, args = (pipe_w, data[idx], prod_barrier)) for idx in range(mp_prod)]
+    mt_prods = [threading.Thread(target = mpmt_producer, args = (pipe_w, data[mp_prod + idx], prod_barrier)) for idx in range(mt_prod)]
+    
+
+    # print(f"MPST prod ({len(mp_prods + mt_prods)}) start with {threading.activeCount()} mt {multiprocessing.active_children()} mp ")
+    for MPMT in itertools.chain(mp_prods, mt_prods):
+        MPMT.start()
+    # time.sleep(0.02)
+    # print("MPSC cons collect")
+    result = []
+    for _ in range(sum(map(len, data))):
+        result.append(pipe_r.recv())
+
+    # print("MPSC prod join")
+    for MPMT in itertools.chain(mp_prods, mt_prods):
+        MPMT.join()
+        
+    # print("joinable result")  
+    R = joinable_test(data, [result])
+
+    # print(f"MPST prod ({len(mp_prods + mt_prods)}) end with {threading.activeCount()} mt {multiprocessing.active_children()} mp ")
+
+    return R
+
+def type02_tester(pipe_r, pipe_w, *data, mp_prod = 0, mt_prod = 0, mp_cons = 0, mt_cons = 0, end_Data = None, ctx = None):
+# def type02_tester(pipe_r, pipe_w, *data, mp_cons = 0, mt_cons = 0, end_Data = None, ctx = None):
     # main thread prod, multi cons
-    ...
-    return joinable_test((pipe.recv() for _ in range(sum(map(len, data)))), *data)
+    # print(f"mp_cons = {mp_cons}, mt_cons = {mt_cons}")#, end_Data = {end_Data} ")
+    assert len(data) == 1
+    ctx = ctx or multiprocessing.get_context()
+    RTQ = ctx.SimpleQueue()
+    cons_barrier = ctx.Barrier(mp_cons + mt_cons)
+    
+    mp_conss = [ctx.Process(target = mpmt_consumer, args = (pipe_r, RTQ, end_Data, cons_barrier)) for _ in range(mp_cons)]
+    mt_conss = [threading.Thread(target = mpmt_consumer, args = (pipe_r, RTQ, end_Data, cons_barrier)) for _ in range(mt_cons)]
 
+    # print(f"SPMT cons ({len(mp_conss + mt_conss)}) start with {threading.activeCount()} mt {multiprocessing.active_children()} mp ")
+    for MPMT in itertools.chain(mp_conss, mt_conss):
+        MPMT.start()
+
+    # print("SPMC send data")
+    for I in data[0]:
+        pipe_w.send(I)
+
+    # print("SPMC cons send end_Data")        
+    for MPMT in itertools.chain(mp_conss, mt_conss):
+        pipe_w.send(end_Data)
+
+    # print("SPMC cons collect")   
+    results = []
+    for MPMT in itertools.chain(mp_conss, mt_conss):
+        results.append(RTQ.get())
+    
+    # print("SPMC cons join")
+    for MPMT in itertools.chain(mp_conss, mt_conss):
+        MPMT.join()
+    
+    # print("joinable result")  
+    R = joinable_test(data, results)
+
+    # print(f"MPST prod ({len(mp_conss + mt_conss)}) end with {threading.activeCount()} mt {multiprocessing.active_children()} mp ")
+
+    return R
+    
 def type22_tester(pipe_r, pipe_w, *data, mp_prod = 0, mt_prod = 0, mp_cons = 0, mt_cons = 0, end_Data = None, ctx = None):
     # multi prod, multi cons
     print(f"mp_prod = {mp_prod} , mt_prod = {mt_prod}, mp_cons = {mp_cons}, mt_cons = {mt_cons}")#, end_Data = {end_Data} ")
@@ -226,10 +289,10 @@ class Type_0(unittest.TestCase):
             TestCase_SPSC.test_all(4, 10000, 4, seed, self)
     def test_small4(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(128, 10000, 4, seed, self)
+            TestCase_SPSC.test_all(2**7, 2**13, 4, seed, self)
     def test_small5(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(128, 10000, 1024, seed, self)
+            TestCase_SPSC.test_all(2**7, 2**13, 1024, seed, self)
     def test_small6(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
             TestCase_SPSC.test_all(2**10, 2**10, 4, seed, self)
@@ -237,68 +300,127 @@ class Type_0(unittest.TestCase):
         for seed in [123,1251,523,12,3535,167,945,933]:
             TestCase_SPSC.test_all(2**16, 2**4, 4, seed, self)
 
-class TestCase_MPMC:
-    mtmc_seed = 0
-    spend_time = collections.defaultdict(float)
+class TestCase_MPMC_base:
+    # mtmc_seed = 0
+    # spend_time = collections.defaultdict(float)
+    # target_fn = type22_tester
     def __init__(self, length, buf_size, seed):
         self.length = length
         self.buf_size = buf_size
         self.seed = seed
-    def run_test(self, data, end_Data, ctx = multiprocessing.get_context()):
-        TestCase_MPMC.spend_time[type(ctx).__name__] -= time.time()
+    def run_test(self, data, end_Data, cons_cnt, ctx = multiprocessing.get_context()):
+        type(self).spend_time[type(ctx).__name__] -= time.time()
         pipe_r, pipe_w = Pipe(self.length, self.buf_size)
-        random.seed(TestCase_MPMC.mtmc_seed)
-        TestCase_MPMC.mtmc_seed += 1
+        random.seed(type(self).mtmc_seed)
+        type(self).mtmc_seed += 1
         mp_prod = random.randrange(0, len(data))
         mt_prod = len(data) - mp_prod
 
-        mp_cons = random.choice([0, 1, 2])
-        mt_cons = random.choice([0, 1, 2][(mp_cons == 0):])
-        # mp_cons = random.choice([0, 1])
-        # mt_cons = mp_cons == 0
+        mp_cons = random.randrange(0, cons_cnt)
+        mt_cons = cons_cnt - mp_cons
 
-        result = type22_tester(pipe_r, pipe_w, *data, mp_prod = mp_prod, mt_prod = mt_prod, mp_cons = mp_cons, mt_cons = mt_cons, end_Data = end_Data, ctx = ctx)
-        TestCase_MPMC.spend_time[type(ctx).__name__] += time.time()
+        result = type(self).target_fn(pipe_r, pipe_w, *data, mp_prod = mp_prod, mt_prod = mt_prod, mp_cons = mp_cons, mt_cons = mt_cons, end_Data = end_Data, ctx = ctx)
+        type(self).spend_time[type(ctx).__name__] += time.time()
         return result
     @classmethod
-    def test_all(cls, length, data_size_range, data_count, buf_size, seed, utc):
+    def test_all(cls, length, data_size_range, prod_cnt, cons_cnt, buf_size, seed, utc):
         TC = cls(length, buf_size, seed)
 
-        TestCase_MPMC.spend_time['data gen'] -= time.time()
+        cls.spend_time['data gen'] -= time.time()
         random.seed(seed)
-        data = [dataset(length, random.randrange(*data_size_range)) for _ in range(data_count)]
-        TestCase_MPMC.spend_time['data gen'] += time.time()
+        data = [dataset(length, random.randrange(*data_size_range)) for _ in range(prod_cnt)]
+        cls.spend_time['data gen'] += time.time()
 
-        TestCase_MPMC.spend_time['search unused'] -= time.time()
+        cls.spend_time['search unused'] -= time.time()
         data_hashes = set(hashlib.sha256(I).digest() for I in itertools.chain.from_iterable(data))
         end_Data = random_bytes(length)
         while hashlib.sha256(end_Data).digest() in data_hashes:
             end_Data = random_bytes(length)
-        TestCase_MPMC.spend_time['search unused'] += time.time()
+        cls.spend_time['search unused'] += time.time()
 
-        utc.assertEqual(TC.run_test(data, end_Data = end_Data, ctx = multiprocessing.get_context("fork")), True)
-        utc.assertEqual(TC.run_test(data, end_Data = end_Data, ctx = multiprocessing.get_context("spawn")), True)
-        utc.assertEqual(TC.run_test(data, end_Data = end_Data, ctx = multiprocessing.get_context("forkserver")), True)
+        utc.assertEqual(TC.run_test(data, end_Data = end_Data, cons_cnt = cons_cnt, ctx = multiprocessing.get_context("fork")), True)
+        utc.assertEqual(TC.run_test(data, end_Data = end_Data, cons_cnt = cons_cnt, ctx = multiprocessing.get_context("spawn")), True)
+        utc.assertEqual(TC.run_test(data, end_Data = end_Data, cons_cnt = cons_cnt, ctx = multiprocessing.get_context("forkserver")), True)
 
-class Type_3(unittest.TestCase):
+def random_ordered_cycle(S, E):
+    local_random = random.Random(123)
+    while True:
+        X = list(range(S, E))
+        local_random.shuffle(X)
+        yield from X
+
+class Test_suite_base:
+    # target_class = TestCase_MPMC
+    # prod_cnt_ord = random_ordered_cycle(1, 4)
+    # cons_cnt_ord = random_ordered_cycle(1, 4)
     def test_small1(self):
-        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            TestCase_MPMC.test_all(4, (1, 10), chunk_count % 4 + 1, 1, seed, self)
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(4, (1, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1, seed, self)
     def test_small2(self):
-        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            TestCase_MPMC.test_all(4, (10, 100), chunk_count % 4 + 1, 4, seed, self)
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(4, (1, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
     def test_small3(self):
-        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            TestCase_MPMC.test_all(4, (1, 100), chunk_count % 4 + 1, 4, seed, self)
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(4, (10, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
     def test_small4(self):
-        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            TestCase_MPMC.test_all(128, (1, 50), chunk_count % 4 + 1, 4, seed, self)
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(128, (1, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
     def test_small5(self):
-        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            TestCase_MPMC.test_all(128, (0, 50), chunk_count % 4 + 1, 1024, seed, self)
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(128, (0, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1024, seed, self)
     def test_small6(self):
-        for chunk_count, seed in enumerate([123,1251,523,12,3535,167,945,933]):
-            TestCase_MPMC.test_all(1024, (0, 50), chunk_count % 4 + 1, 4, seed, self)
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(1024, (0, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+
+class Test_suite_large:
+    # target_class = TestCase_MPMC
+    # prod_cnt_ord = random_ordered_cycle(1, 4)
+    # cons_cnt_ord = random_ordered_cycle(1, 4)
+    def test_small1(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(4, (1, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1, seed, self)
+    def test_small2(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(4, (1, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+    def test_small3(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(4, (10, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+    def test_small4(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(128, (1, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+    def test_small5(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(128, (0, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1024, seed, self)
+    def test_small6(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(1024, (0, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+
+class TestCase_MPSC(TestCase_MPMC_base):
+    mtmc_seed = 0
+    spend_time = collections.defaultdict(float)
+    target_fn = type20_tester
+class Type_1(unittest.TestCase, Test_suite_base):
+    target_class = TestCase_MPSC
+    prod_cnt_ord = random_ordered_cycle(1, 5)
+    cons_cnt_ord = itertools.cycle([1])
+
+class TestCase_SPMC(TestCase_MPMC_base):
+    mtmc_seed = 0
+    spend_time = collections.defaultdict(float)
+    target_fn = type02_tester
+class Type_2(unittest.TestCase, Test_suite_base):
+    target_class = TestCase_SPMC
+    prod_cnt_ord = itertools.cycle([1])
+    cons_cnt_ord = random_ordered_cycle(1, 5)
+    
+# class TestCase_MPMC(TestCase_MPMC_base):
+#     mtmc_seed = 0
+#     spend_time = collections.defaultdict(float)
+#     target_fn = type22_tester
+# class Type_3(unittest.TestCase, Test_suite_base):
+#     target_class = TestCase_MPMC
+#     prod_cnt_ord = random_ordered_cycle(1, 5)
+#     cons_cnt_ord = random_ordered_cycle(1, 5)
 
 if __name__ == '__main__':
     try:
@@ -307,5 +429,11 @@ if __name__ == '__main__':
         for K, V in TestCase_SPSC.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("====================")
-        for K, V in TestCase_MPMC.spend_time.items():
+        for K, V in Type_1.target_class.spend_time.items():
+            print(f"{K} : {V: 4.2f}")
+        print("====================")
+        for K, V in Type_2.target_class.spend_time.items():
+            print(f"{K} : {V: 4.2f}")
+        print("====================")
+        for K, V in Type_3.target_class.spend_time.items():
             print(f"{K} : {V: 4.2f}")
