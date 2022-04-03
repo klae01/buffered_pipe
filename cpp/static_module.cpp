@@ -3,8 +3,9 @@
 #include <Python.h>
 
 #include <fcntl.h>
-#include <sys/shm.h>
-#include <sys/types.h>
+// #include <stdlib.h>
+// #include <unistd.h>
+#include <sys/mman.h>
 #include <semaphore.h>
 #include <string.h>
 #include <assert.h>
@@ -38,155 +39,213 @@ for(int i = 0;i < 10; i ++) \
 #define show_time_spend(pipe)
 #endif
 
+#define NULL_PID -1
+#define NULL_FD -1
+
 const unsigned int PyBytesObject_SIZE = offsetof(PyBytesObject, ob_sval) + 1;
 
 struct Pipe_info {
     // placed on shared memory
-    unsigned int obj_size;
-    unsigned int obj_cnt;
     volatile unsigned int pointer_a;
     volatile unsigned int pointer_f;
     sem_t sem_a, sem_f;
-    pthread_mutex_t mutex_w, mutex_r;
+    pthread_mutex_t mutex_a, mutex_f, mutex_m;
 };
 
 struct Pipe {
     // placed on private memory, save on python
     void *info; // Cached attached shared memory address
     
-    unsigned int info_id;
+    unsigned int obj_cnt;
+    unsigned int obj_size;
+    unsigned int shm_fd;
     pid_t pid;
 pipe_timer_data
+
+    void init(void *shm_fn){
+        pid = getpid();
+        if ((shm_fd = shm_open((char *)shm_fn, O_RDWR|O_CREAT, 0777)) == -1) {
+            fprintf(stderr, "Open failed: %s\n", strerror(errno));
+            exit(1);
+        }
+        if (ftruncate(shm_fd, PAGESIZE()) == -1) {
+            fprintf(stderr, "ftruncate : %s\n", strerror(errno));
+            exit(1);
+        }
+        info = mmap(0, PAGESIZE(), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    }
+    void reinit(void *shm_fn){
+        pid_t _pid = getpid();
+        if(pid != _pid) {
+            pid = _pid;
+            shm_fd = shm_open((char *)shm_fn, O_RDWR, 0777);
+            info = mmap(0, PAGESIZE(), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+        }
+    }
+    inline unsigned int PAGESIZE(){return sizeof(Pipe_info) + obj_size * obj_cnt;}
+    inline char* GET_BUF(){return (char*)info;}
+    inline Pipe_info* GET_INFO(){return (Pipe_info*) (info + obj_size * obj_cnt);}
 };
 
-void mp_request_init(Pipe &pipe) {
-    pid_t pid = getpid();
-    if(pipe.pid != pid) {
-        pipe.info = shmat(pipe.info_id, NULL, 0);
-        pipe.pid = pid;
-    }
-}
-
 PyObject* __init(PyObject *, PyObject* args) {
-    unsigned int obj_size, obj_cnt;
-    PyArg_ParseTuple(args, "II", &obj_size, &obj_cnt);
+    Py_buffer fn_obj;
+    unsigned int obj_cnt, obj_size;
+    PyArg_ParseTuple(args, "IIs*", &obj_size, &obj_cnt, &fn_obj);
 
     Pipe pipe;
     memset(&pipe, 0, sizeof(Pipe));
-    pipe.info_id = shmget(IPC_PRIVATE, sizeof(Pipe_info) + obj_size * obj_cnt, IPC_CREAT | 0644);
-    pipe.info = shmat(pipe.info_id, NULL, 0);
-    memset(pipe.info, 0, sizeof(Pipe_info));
-    Pipe_info &info = *(Pipe_info*)pipe.info;
-
-    info.obj_size = obj_size;
-    info.obj_cnt = obj_cnt;
+    pipe.obj_size = obj_size;
+    pipe.obj_cnt = obj_cnt;
+    pipe.init(fn_obj.buf);
+    Pipe_info &info = *pipe.GET_INFO();
 
     sem_init(&info.sem_a, 1, 0);
-    sem_init(&info.sem_f, 1, info.obj_cnt);
+    sem_init(&info.sem_f, 1, pipe.obj_cnt);
 
     pthread_mutexattr_t psharedm;
     pthread_mutexattr_init(&psharedm);
-    // pthread_mutexattr_setrobust(&psharedm, PTHREAD_MUTEX_ROBUST);
+    pthread_mutexattr_setrobust(&psharedm, PTHREAD_MUTEX_ROBUST);
     pthread_mutexattr_setpshared(&psharedm, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(&info.mutex_w, &psharedm);
-    pthread_mutex_init(&info.mutex_r, &psharedm);
-    
-    pipe.pid = getpid();
+    pthread_mutex_init(&info.mutex_a, &psharedm);
+    pthread_mutex_init(&info.mutex_f, &psharedm);
+    pthread_mutex_init(&info.mutex_m, &psharedm);
+
+    PyBuffer_Release(&fn_obj);
     return PyBytes_FromStringAndSize((char*) &pipe, sizeof(Pipe));
 }
 
 PyObject* __free(PyObject *, PyObject* args) {
-    Py_buffer pipe_obj;
-    PyObject_GetBuffer(args, &pipe_obj, PyBUF_SIMPLE);
+    Py_buffer pipe_obj, fn_obj;
+    PyArg_ParseTuple(args, "y*s*", &pipe_obj, &fn_obj);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
 show_time_spend(pipe)
-    shmdt(pipe->info);
-    shmctl(pipe->info_id , IPC_RMID , NULL);
+    if(pipe->pid != NULL_PID) {
+        munmap(pipe->info, pipe->PAGESIZE());
+        // close(pipe->shm_fd);
+        shm_unlink((char*)fn_obj.buf);
+        pipe->shm_fd = NULL_FD;
+        pipe->pid = NULL_PID;
+    }
+
     PyBuffer_Release(&pipe_obj);
+    PyBuffer_Release(&fn_obj);
     Py_RETURN_NONE;
 }
 
 PyObject* recv_bytes(PyObject *, PyObject* args) {
 local_timer_init
 collect_time
-    Py_buffer pipe_obj;
-    PyObject_GetBuffer(args, &pipe_obj, PyBUF_SIMPLE);
+    Py_buffer pipe_obj, fn_obj;
+    PyArg_ParseTuple(args, "y*s*", &pipe_obj, &fn_obj);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
-    mp_request_init(*pipe);
-    char* pointer = (char*) pipe->info + sizeof(Pipe_info);
-    Pipe_info &info = *(Pipe_info*)pipe->info;
+    pipe->reinit(fn_obj.buf);
+    char* pointer = pipe->GET_BUF();
+    Pipe_info *info = pipe->GET_INFO();
 
-    PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + info.obj_size);
-    PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, info.obj_size);
+    // PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + pipe->obj_size);
+    // PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, pipe->obj_size);
 
 collect_time
-    if(sem_trywait(&info.sem_a)) {
+    if(sem_trywait(&info->sem_a)) {
         Py_BEGIN_ALLOW_THREADS
-        sem_wait(&info.sem_a);
+        sem_wait(&info->sem_a);
         Py_END_ALLOW_THREADS 
     }
 collect_time
-    if(pthread_mutex_trylock(&info.mutex_r)) {
+    if(pthread_mutex_trylock(&info->mutex_f)) {
         Py_BEGIN_ALLOW_THREADS
-        pthread_mutex_lock(&info.mutex_r);
+        pthread_mutex_lock(&info->mutex_f);
         Py_END_ALLOW_THREADS 
     }
-    pointer += info.pointer_f * info.obj_size;
-    if(++info.pointer_f == info.obj_cnt)
-        info.pointer_f = 0;
-    pthread_mutex_unlock(&info.mutex_r);
+    pointer += info->pointer_f * pipe->obj_size;
+    if(++info->pointer_f == pipe->obj_cnt)
+        info->pointer_f = 0;
+    msync((void*)&info->pointer_f, sizeof(info->pointer_f), MS_SYNC | MS_INVALIDATE);
+    pthread_mutex_unlock(&info->mutex_f);
 collect_time
-
-    // PyObject* result = PyBytes_FromStringAndSize(pointer, info.obj_size);
+    PyObject* result = PyBytes_FromStringAndSize(pointer, pipe->obj_size);
     // PyObject* result = PyByteArray_FromStringAndSize(pointer, info.obj_size);
-    unsigned int len = info.obj_size;
-    char *d_buf = (char *)result->ob_sval;
-    for(volatile char *pt = pointer; len--; *(d_buf++) = *(pt++));
-    // memcpy(result->ob_sval, pointer, info.obj_size);
-    sem_post(&info.sem_f);
+    // unsigned int len = pipe->obj_size;
+    // char *d_buf = (char *)result->ob_sval;
+    // for(volatile char *pt = pointer; len--; *(d_buf++) = *(pt++));
+    // memcpy(result->ob_sval, pointer, pipe->obj_size);
+    sem_post(&info->sem_f);
 collect_time
 update_time(pipe)
     PyBuffer_Release(&pipe_obj);
+    PyBuffer_Release(&fn_obj);
     return (PyObject *)result;
 }
 
 PyObject* send_bytes(PyObject *, PyObject *args) {
 local_timer_init
 collect_time
-    Py_buffer pipe_obj, data_obj;
-    PyArg_ParseTuple(args, "y*y*", &pipe_obj, &data_obj);
+    Py_buffer pipe_obj, data_obj, fn_obj;
+    PyArg_ParseTuple(args, "y*y*s*", &pipe_obj, &data_obj, &fn_obj);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
-    mp_request_init(*pipe);
-    char* pointer = (char*) pipe->info + sizeof(Pipe_info);
-    Pipe_info &info = *(Pipe_info*)pipe->info;
-    assert(info.obj_size == data_obj.len);
+    pipe->reinit(fn_obj.buf);
+    char* pointer = pipe->GET_BUF();
+    Pipe_info *info = pipe->GET_INFO();
+    assert(pipe->obj_size == data_obj.len);
     
 collect_time
-    if(sem_trywait(&info.sem_f)) {
+    if(sem_trywait(&info->sem_f)) {
         Py_BEGIN_ALLOW_THREADS 
-        sem_wait(&info.sem_f);
+        sem_wait(&info->sem_f);
         Py_END_ALLOW_THREADS 
     }
 collect_time
-    if(pthread_mutex_trylock(&info.mutex_w)) {
+    if(pthread_mutex_trylock(&info->mutex_a)) {
         Py_BEGIN_ALLOW_THREADS
-        pthread_mutex_lock(&info.mutex_w);
+        pthread_mutex_lock(&info->mutex_a);
         Py_END_ALLOW_THREADS 
     }
-    pointer += info.pointer_a * info.obj_size;
-    if(++info.pointer_a == info.obj_cnt)
-        info.pointer_a = 0;
-    pthread_mutex_unlock(&info.mutex_w);
-collect_time
+    pointer += info->pointer_a * pipe->obj_size;
+    if(++info->pointer_a == pipe->obj_cnt)
+        info->pointer_a = 0;
+        
+    // msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_SYNC);
+    // pthread_mutex_unlock(&info->mutex_a);
 
-    unsigned int len = info.obj_size;
-    char *d_buf = (char *)data_obj.buf;
-    for(volatile char *pt = pointer; len--; *(pt++) = *(d_buf++));
-    // memcpy(pointer, data_obj.buf, info.obj_size);
-    sem_post(&info.sem_a);
+    // if(pthread_mutex_trylock(&info->mutex_m)) {
+    //     Py_BEGIN_ALLOW_THREADS
+    //     pthread_mutex_lock(&info->mutex_m);
+    //     Py_END_ALLOW_THREADS 
+    // }
+    // memcpy(pointer, data_obj.buf, pipe->obj_size);
+    // msync(pointer, pipe->obj_size, MS_SYNC);
+    // sem_post(&info->sem_a);
+    // pthread_mutex_unlock(&info->mutex_m);
+    
+    msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_ASYNC);
+
+    memcpy(pointer, data_obj.buf, pipe->obj_size);
+    msync(pointer, pipe->obj_size, MS_SYNC | MS_INVALIDATE);
+    sem_post(&info->sem_a);
+
+    msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_SYNC | MS_INVALIDATE);
+    pthread_mutex_unlock(&info->mutex_a);
+collect_time
+    
+    // if(pthread_mutex_trylock(&info->mutex_m)) {
+    //     memcpy(pointer, data_obj.buf, pipe->obj_size);
+    //     msync(pointer, pipe->obj_size, MS_SYNC);
+        
+    //     Py_BEGIN_ALLOW_THREADS
+    //     pthread_mutex_lock(&info->mutex_m);
+    //     pthread_mutex_unlock(&info->mutex_a);
+    //     Py_END_ALLOW_THREADS 
+    // } else {
+    //     pthread_mutex_unlock(&info->mutex_a);
+    //     memcpy(pointer, data_obj.buf, pipe->obj_size);
+    //     msync(pointer, pipe->obj_size, MS_SYNC);
+    // }
+    // sem_post(&info->sem_a);
+    // pthread_mutex_unlock(&info->mutex_m);
 collect_time
 update_time(pipe)
     PyBuffer_Release(&data_obj);
+    PyBuffer_Release(&fn_obj);
     PyBuffer_Release(&pipe_obj);
     Py_RETURN_NONE;
 }
