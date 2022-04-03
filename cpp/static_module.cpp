@@ -64,7 +64,7 @@ pipe_timer_data
 
     void init(void *shm_fn){
         pid = getpid();
-        if ((shm_fd = shm_open((char *)shm_fn, O_RDWR|O_CREAT, 0777)) == -1) {
+        if ((shm_fd = shm_open((char *)shm_fn, O_RDWR|O_CREAT, 0666)) == -1) {
             fprintf(stderr, "Open failed: %s\n", strerror(errno));
             exit(1);
         }
@@ -78,7 +78,7 @@ pipe_timer_data
         pid_t _pid = getpid();
         if(pid != _pid) {
             pid = _pid;
-            shm_fd = shm_open((char *)shm_fn, O_RDWR, 0777);
+            shm_fd = shm_open((char *)shm_fn, O_RDWR, 0666);
             info = mmap(0, PAGESIZE(), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
         }
     }
@@ -120,6 +120,8 @@ PyObject* __free(PyObject *, PyObject* args) {
     Pipe *pipe = (Pipe*)pipe_obj.buf;
 show_time_spend(pipe)
     if(pipe->pid != NULL_PID) {
+        sem_destroy(&((Pipe_info*)pipe->info)->sem_a);
+        sem_destroy(&((Pipe_info*)pipe->info)->sem_f);
         munmap(pipe->info, pipe->PAGESIZE());
         // close(pipe->shm_fd);
         shm_unlink((char*)fn_obj.buf);
@@ -132,6 +134,28 @@ show_time_spend(pipe)
     Py_RETURN_NONE;
 }
 
+struct read_request_data {
+    PyObject* result;
+    Pipe* pipe;
+    void* pointer;
+    sem_t* sem;
+    read_request_data(Pipe* v1, void* v2, sem_t* v3):pipe(v1), pointer(v2), sem(v3){}
+};
+void *read_request(void *_data) {
+    read_request_data* data = (read_request_data*) _data;
+    data->result = PyBytes_FromStringAndSize((char *)data->pointer, data->pipe->obj_size);
+    // PyObject* result = PyByteArray_FromStringAndSize(pointer, info.obj_size);
+
+    // PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + pipe->obj_size);
+    // PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, pipe->obj_size);
+    // unsigned int len = pipe->obj_size;
+    // char *d_buf = (char *)result->ob_sval;
+    // for(volatile char *pt = pointer; len--; *(d_buf++) = *(pt++));
+    // memcpy(result->ob_sval, pointer, pipe->obj_size);
+    sem_post(data->sem);
+    
+    return NULL; // pthread_exit(NULL);
+}
 PyObject* recv_bytes(PyObject *, PyObject* args) {
 local_timer_init
 collect_time
@@ -141,9 +165,6 @@ collect_time
     pipe->reinit(fn_obj.buf);
     char* pointer = pipe->GET_BUF();
     Pipe_info *info = pipe->GET_INFO();
-
-    // PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + pipe->obj_size);
-    // PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, pipe->obj_size);
 
 collect_time
     if(sem_trywait(&info->sem_a)) {
@@ -160,21 +181,24 @@ collect_time
     pointer += info->pointer_f * pipe->obj_size;
     if(++info->pointer_f == pipe->obj_cnt)
         info->pointer_f = 0;
-    msync((void*)&info->pointer_f, sizeof(info->pointer_f), MS_SYNC | MS_INVALIDATE);
-    pthread_mutex_unlock(&info->mutex_f);
-collect_time
-    PyObject* result = PyBytes_FromStringAndSize(pointer, pipe->obj_size);
-    // PyObject* result = PyByteArray_FromStringAndSize(pointer, info.obj_size);
-    // unsigned int len = pipe->obj_size;
-    // char *d_buf = (char *)result->ob_sval;
-    // for(volatile char *pt = pointer; len--; *(d_buf++) = *(pt++));
-    // memcpy(result->ob_sval, pointer, pipe->obj_size);
-    sem_post(&info->sem_f);
+
+    read_request_data data(pipe, pointer, &info->sem_f);
+    {
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, read_request, (void *)&data) < 0) {
+            perror("thread create error : ");
+            exit(0);
+        }
+        msync((void*)&info->pointer_f, sizeof(info->pointer_f), MS_SYNC | MS_INVALIDATE);
+        pthread_mutex_unlock(&info->mutex_f);
+
+        pthread_join(thread, nullptr);
+    }
 collect_time
 update_time(pipe)
     PyBuffer_Release(&pipe_obj);
     PyBuffer_Release(&fn_obj);
-    return (PyObject *)result;
+    return data.result;
 }
 
 PyObject* send_bytes(PyObject *, PyObject *args) {
@@ -203,45 +227,15 @@ collect_time
     pointer += info->pointer_a * pipe->obj_size;
     if(++info->pointer_a == pipe->obj_cnt)
         info->pointer_a = 0;
-        
-    // msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_SYNC);
-    // pthread_mutex_unlock(&info->mutex_a);
 
-    // if(pthread_mutex_trylock(&info->mutex_m)) {
-    //     Py_BEGIN_ALLOW_THREADS
-    //     pthread_mutex_lock(&info->mutex_m);
-    //     Py_END_ALLOW_THREADS 
-    // }
-    // memcpy(pointer, data_obj.buf, pipe->obj_size);
-    // msync(pointer, pipe->obj_size, MS_SYNC);
-    // sem_post(&info->sem_a);
-    // pthread_mutex_unlock(&info->mutex_m);
+    msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_ASYNC | MS_INVALIDATE);
     
-    msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_ASYNC);
-
     memcpy(pointer, data_obj.buf, pipe->obj_size);
     msync(pointer, pipe->obj_size, MS_SYNC | MS_INVALIDATE);
+    msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_SYNC);
     sem_post(&info->sem_a);
 
-    msync((void*)&info->pointer_a, sizeof(info->pointer_a), MS_SYNC | MS_INVALIDATE);
     pthread_mutex_unlock(&info->mutex_a);
-collect_time
-    
-    // if(pthread_mutex_trylock(&info->mutex_m)) {
-    //     memcpy(pointer, data_obj.buf, pipe->obj_size);
-    //     msync(pointer, pipe->obj_size, MS_SYNC);
-        
-    //     Py_BEGIN_ALLOW_THREADS
-    //     pthread_mutex_lock(&info->mutex_m);
-    //     pthread_mutex_unlock(&info->mutex_a);
-    //     Py_END_ALLOW_THREADS 
-    // } else {
-    //     pthread_mutex_unlock(&info->mutex_a);
-    //     memcpy(pointer, data_obj.buf, pipe->obj_size);
-    //     msync(pointer, pipe->obj_size, MS_SYNC);
-    // }
-    // sem_post(&info->sem_a);
-    // pthread_mutex_unlock(&info->mutex_m);
 collect_time
 update_time(pipe)
     PyBuffer_Release(&data_obj);

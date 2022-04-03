@@ -96,7 +96,7 @@ class UploadCommand(Command):
 
 ext_modules = [
     Extension('buffered_pipe.generic_module', sources = ['cpp/generic_module.cpp']), 
-    Extension('buffered_pipe.static_module', sources = ['cpp/static_module.cpp'], libraries = ["rt"])
+    Extension('buffered_pipe.static_module', sources = ['cpp/static_module.cpp'], libraries = ["pthread", "rt"])
 ]
 
 # Where the magic happens:
