@@ -328,17 +328,24 @@ class TestCase_MPMC_base:
     def test_all(cls, length, data_size_range, prod_cnt, cons_cnt, buf_size, seed, utc):
         TC = cls(length, buf_size, seed)
 
-        utc.spend_time['data gen'] -= time.time()
-        random.seed(seed)
-        data = [dataset(length, random.randrange(*data_size_range)) for _ in range(prod_cnt)]
-        utc.spend_time['data gen'] += time.time()
+        while True:
+            utc.spend_time['data gen'] -= time.time()
+            random.seed(seed)
+            data = [dataset(length, random.randrange(*data_size_range)) for _ in range(prod_cnt)]
+            utc.spend_time['data gen'] += time.time()
 
-        utc.spend_time['search unused'] -= time.time()
-        data_hashes = set(hashlib.sha256(I).digest() for I in itertools.chain.from_iterable(data))
-        end_Data = random_bytes(length)
-        while hashlib.sha256(end_Data).digest() in data_hashes:
+            utc.spend_time['search unused'] -= time.time()
+            data_hashes = set(hashlib.sha256(I).digest() for I in itertools.chain.from_iterable(data))
             end_Data = random_bytes(length)
-        utc.spend_time['search unused'] += time.time()
+            for _ in range(10):
+                if hashlib.sha256(end_Data).digest() not in data_hashes:
+                    break
+                end_Data = random_bytes(length)
+            utc.spend_time['search unused'] += time.time()
+            
+            if hashlib.sha256(end_Data).digest() not in data_hashes:
+                break
+        
 
         utc.assertEqual(TC.run_test(data, end_Data = end_Data, cons_cnt = cons_cnt, ctx = multiprocessing.get_context("fork"), spend_time = utc.spend_time), True)
         utc.assertEqual(TC.run_test(data, end_Data = end_Data, cons_cnt = cons_cnt, ctx = multiprocessing.get_context("spawn"), spend_time = utc.spend_time), True)
@@ -397,6 +404,29 @@ class Test_suite_large:
         for seed in [123,1251,523,12,3535,167,945,933]:
             type(self).target_class.test_all(1024, (0, 50000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 32, seed, self)
 
+class Test_suite_OOS: # out of standard; object size is not multiple of 4
+    # target_class = TestCase_MPMC
+    # prod_cnt_ord = random_ordered_cycle(1, 4)
+    # cons_cnt_ord = random_ordered_cycle(1, 4)
+    def test_small1(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(1, (1, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1, seed, self)
+    def test_small2(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(3, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+    def test_small3(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(7, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+    def test_small4(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(9, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+    def test_small5(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(13, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1024, seed, self)
+    def test_small6(self):
+        for seed in [123,1251,523,12,3535,167,945,933]:
+            type(self).target_class.test_all(17, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+
 class TestCase_MPSC(TestCase_MPMC_base):
     mtmc_seed = 0
     target_fn = type20_tester
@@ -409,6 +439,11 @@ class Type_1L(unittest.TestCase, Test_suite_large):
     target_class = TestCase_MPSC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = random_ordered_cycle(1, 20)
+    cons_cnt_ord = itertools.cycle([1])
+class Type_1O(unittest.TestCase, Test_suite_large):
+    target_class = TestCase_MPSC
+    spend_time = collections.defaultdict(float)
+    prod_cnt_ord = random_ordered_cycle(1, 10)
     cons_cnt_ord = itertools.cycle([1])
 
 class TestCase_SPMC(TestCase_MPMC_base):
@@ -424,6 +459,11 @@ class Type_2L(unittest.TestCase, Test_suite_large):
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = itertools.cycle([1])
     cons_cnt_ord = random_ordered_cycle(1, 20)
+class Type_2O(unittest.TestCase, Test_suite_large):
+    target_class = TestCase_SPMC
+    spend_time = collections.defaultdict(float)
+    prod_cnt_ord = itertools.cycle([1])
+    cons_cnt_ord = random_ordered_cycle(1, 10)
     
 class TestCase_MPMC(TestCase_MPMC_base):
     mtmc_seed = 0
@@ -438,8 +478,16 @@ class Type_3L(unittest.TestCase, Test_suite_large):
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = random_ordered_cycle(1, 20)
     cons_cnt_ord = random_ordered_cycle(1, 20)
+class Type_3O(unittest.TestCase, Test_suite_large):
+    target_class = TestCase_MPMC
+    spend_time = collections.defaultdict(float)
+    prod_cnt_ord = random_ordered_cycle(1, 10)
+    cons_cnt_ord = random_ordered_cycle(1, 10)
 
 if __name__ == '__main__':
+    path_info = __file__.split('/')
+    path_info = '/'.join(path_info[path_info.index('tests'):])
+    print(path_info)
     try:
         unittest.main(exit=False)
     finally:
@@ -451,15 +499,24 @@ if __name__ == '__main__':
         print("--------------------")
         for K, V in Type_1L.spend_time.items():
             print(f"{K} : {V: 4.2f}")
+        print("--------------------")
+        for K, V in Type_1O.spend_time.items():
+            print(f"{K} : {V: 4.2f}")
         print("====================")
         for K, V in Type_2.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("--------------------")
         for K, V in Type_2L.spend_time.items():
             print(f"{K} : {V: 4.2f}")
+        print("--------------------")
+        for K, V in Type_2O.spend_time.items():
+            print(f"{K} : {V: 4.2f}")
         print("====================")
         for K, V in Type_3.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("--------------------")
         for K, V in Type_3L.spend_time.items():
+            print(f"{K} : {V: 4.2f}")
+        print("--------------------")
+        for K, V in Type_3O.spend_time.items():
             print(f"{K} : {V: 4.2f}")
