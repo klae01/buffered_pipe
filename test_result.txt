@@ -1,0 +1,65 @@
+tests/static_pipe.py
+.............................................................
+----------------------------------------------------------------------
+Ran 61 tests in 1394.657s
+
+OK
+data gen :  3.89
+ForkContext :  1.71
+SpawnContext :  4.98
+ForkServerContext :  3.36
+threading :  0.03
+====================
+data gen :  0.01
+search unused :  0.00
+ForkContext :  0.19
+SpawnContext :  1.53
+ForkServerContext :  0.69
+--------------------
+data gen :  42.41
+search unused :  8.00
+ForkContext :  120.58
+SpawnContext :  130.94
+ForkServerContext :  120.19
+--------------------
+data gen :  20.05
+search unused :  3.52
+ForkContext :  42.13
+SpawnContext :  44.81
+ForkServerContext :  41.73
+====================
+data gen :  0.01
+search unused :  0.00
+ForkContext :  0.60
+SpawnContext :  1.81
+ForkServerContext :  0.61
+--------------------
+data gen :  4.55
+search unused :  0.78
+ForkContext :  10.19
+SpawnContext :  13.24
+ForkServerContext :  9.33
+--------------------
+data gen :  4.51
+search unused :  0.78
+ForkContext :  9.33
+SpawnContext :  11.51
+ForkServerContext :  8.44
+====================
+data gen :  0.01
+search unused :  0.00
+ForkContext :  1.90
+SpawnContext :  3.56
+ForkServerContext :  0.94
+--------------------
+data gen :  42.07
+search unused :  8.01
+ForkContext :  154.04
+SpawnContext :  168.65
+ForkServerContext :  148.09
+--------------------
+data gen :  20.20
+search unused :  3.43
+ForkContext :  58.22
+SpawnContext :  59.86
+ForkServerContext :  51.28

@@ -44,15 +44,15 @@ struct Pipe_info {
     // placed on shared memory
     unsigned int obj_size;
     unsigned int obj_cnt;
-    unsigned int pointer_a;
-    unsigned int pointer_f;
+    volatile unsigned int pointer_a;
+    volatile unsigned int pointer_f;
     sem_t sem_a, sem_f;
     pthread_mutex_t mutex_w, mutex_r;
 };
 
 struct Pipe {
     // placed on private memory, save on python
-    void *info; // info with buffer
+    void *info; // Cached attached shared memory address
     
     unsigned int info_id;
     pid_t pid;
@@ -86,6 +86,7 @@ PyObject* __init(PyObject *, PyObject* args) {
 
     pthread_mutexattr_t psharedm;
     pthread_mutexattr_init(&psharedm);
+    // pthread_mutexattr_setrobust(&psharedm, PTHREAD_MUTEX_ROBUST);
     pthread_mutexattr_setpshared(&psharedm, PTHREAD_PROCESS_SHARED);
     pthread_mutex_init(&info.mutex_w, &psharedm);
     pthread_mutex_init(&info.mutex_r, &psharedm);
@@ -115,8 +116,8 @@ collect_time
     char* pointer = (char*) pipe->info + sizeof(Pipe_info);
     Pipe_info &info = *(Pipe_info*)pipe->info;
 
-    // PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + info.obj_size);
-    // PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, info.obj_size);
+    PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + info.obj_size);
+    PyObject_InitVar((PyVarObject*)result, &PyBytes_Type, info.obj_size);
 
 collect_time
     if(sem_trywait(&info.sem_a)) {
@@ -133,16 +134,18 @@ collect_time
     pointer += info.pointer_f * info.obj_size;
     if(++info.pointer_f == info.obj_cnt)
         info.pointer_f = 0;
-    pthread_mutex_unlock(&info.mutex_r);
-collect_time
-
-    PyObject* result = PyBytes_FromStringAndSize(pointer, info.obj_size);
+    // PyObject* result = PyBytes_FromStringAndSize(pointer, info.obj_size);
     // PyObject* result = PyByteArray_FromStringAndSize(pointer, info.obj_size);
+    unsigned int len = info.obj_size;
+    char *d_buf = (char *)result->ob_sval;
+    for(volatile char *pt = pointer; len--; *(d_buf++) = *(pt++));
     // memcpy(result->ob_sval, pointer, info.obj_size);
     sem_post(&info.sem_f);
-    PyBuffer_Release(&pipe_obj);
+
+    pthread_mutex_unlock(&info.mutex_r);
 collect_time
 update_time(pipe)
+    PyBuffer_Release(&pipe_obj);
     return (PyObject *)result;
 }
 
@@ -172,15 +175,18 @@ collect_time
     pointer += info.pointer_a * info.obj_size;
     if(++info.pointer_a == info.obj_cnt)
         info.pointer_a = 0;
+
+    unsigned int len = info.obj_size;
+    char *d_buf = (char *)data_obj.buf;
+    for(volatile char *pt = pointer; len--; *(pt++) = *(d_buf++));
+    // memcpy(pointer, data_obj.buf, info.obj_size);
+    sem_post(&info.sem_a);
+
     pthread_mutex_unlock(&info.mutex_w);
 collect_time
-
-    memcpy(pointer, data_obj.buf, info.obj_size);
-    sem_post(&info.sem_a);
-    PyBuffer_Release(&pipe_obj);
-    PyBuffer_Release(&data_obj);
-collect_time
 update_time(pipe)
+    PyBuffer_Release(&data_obj);
+    PyBuffer_Release(&pipe_obj);
     Py_RETURN_NONE;
 }
 
