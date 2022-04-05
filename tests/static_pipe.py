@@ -12,7 +12,11 @@ import os
 from buffered_pipe import Static_Pipe as Pipe
 
 # random_bytes = lambda n: bytes(random.randint(0, 255) for _ in range(n))
-random_bytes = lambda n: os.urandom(n)
+total_gen_bytes = 0
+def random_bytes(n):
+    global total_gen_bytes
+    total_gen_bytes += n
+    return os.urandom(n)
 
 def dataset(length, count):
     return [random_bytes(length) for _ in range(count)]
@@ -243,6 +247,16 @@ def type22_tester(pipe_r, pipe_w, *data, mp_prod = 0, mt_prod = 0, mp_cons = 0, 
 
     return R
 
+class transfer_tracker:
+    @classmethod
+    def setUpClass(cls):
+        try: cls.transfers
+        except: cls.transfers = 0
+        cls.transfers -= total_gen_bytes
+    @classmethod
+    def tearDownClass(cls):
+        cls.transfers += total_gen_bytes
+
 class TestCase_SPSC:
     spend_time = collections.defaultdict(float)
     def __init__(self, length, count, buf_size, seed):
@@ -279,7 +293,7 @@ class TestCase_SPSC:
         utc.assertEqual(TC.mp_test(data, ctx = multiprocessing.get_context("forkserver")), True)
         utc.assertEqual(TC.mt_test(data), True)
 
-class Type_0(unittest.TestCase):
+class Type_0(transfer_tracker, unittest.TestCase):
     def test_small1(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
             TestCase_SPSC.test_all(4, 2**15, 1, seed, self)
@@ -430,17 +444,17 @@ class Test_suite_OOS: # out of standard; object size is not multiple of 4
 class TestCase_MPSC(TestCase_MPMC_base):
     mtmc_seed = 0
     target_fn = type20_tester
-class Type_1(unittest.TestCase, Test_suite_base):
+class Type_1(transfer_tracker, unittest.TestCase, Test_suite_base):
     target_class = TestCase_MPSC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = random_ordered_cycle(1, 5)
     cons_cnt_ord = itertools.cycle([1])
-class Type_1L(unittest.TestCase, Test_suite_large):
+class Type_1L(transfer_tracker, unittest.TestCase,  Test_suite_large):
     target_class = TestCase_MPSC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = random_ordered_cycle(1, 20)
     cons_cnt_ord = itertools.cycle([1])
-class Type_1O(unittest.TestCase, Test_suite_large):
+class Type_1O(transfer_tracker, unittest.TestCase,  Test_suite_OOS):
     target_class = TestCase_MPSC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = random_ordered_cycle(1, 10)
@@ -449,17 +463,17 @@ class Type_1O(unittest.TestCase, Test_suite_large):
 class TestCase_SPMC(TestCase_MPMC_base):
     mtmc_seed = 0
     target_fn = type02_tester
-class Type_2(unittest.TestCase, Test_suite_base):
+class Type_2(transfer_tracker, unittest.TestCase,  Test_suite_base):
     target_class = TestCase_SPMC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = itertools.cycle([1])
     cons_cnt_ord = random_ordered_cycle(1, 5)
-class Type_2L(unittest.TestCase, Test_suite_large):
+class Type_2L(transfer_tracker, unittest.TestCase,  Test_suite_large):
     target_class = TestCase_SPMC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = itertools.cycle([1])
     cons_cnt_ord = random_ordered_cycle(1, 20)
-class Type_2O(unittest.TestCase, Test_suite_large):
+class Type_2O(transfer_tracker, unittest.TestCase,  Test_suite_OOS):
     target_class = TestCase_SPMC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = itertools.cycle([1])
@@ -468,17 +482,17 @@ class Type_2O(unittest.TestCase, Test_suite_large):
 class TestCase_MPMC(TestCase_MPMC_base):
     mtmc_seed = 0
     target_fn = type22_tester
-class Type_3(unittest.TestCase, Test_suite_base):
+class Type_3(transfer_tracker, unittest.TestCase,  Test_suite_base):
     target_class = TestCase_MPMC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = random_ordered_cycle(1, 5)
     cons_cnt_ord = random_ordered_cycle(1, 5)
-class Type_3L(unittest.TestCase, Test_suite_large):
+class Type_3L(transfer_tracker, unittest.TestCase,  Test_suite_large):
     target_class = TestCase_MPMC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = random_ordered_cycle(1, 20)
     cons_cnt_ord = random_ordered_cycle(1, 20)
-class Type_3O(unittest.TestCase, Test_suite_large):
+class Type_3O(transfer_tracker, unittest.TestCase,  Test_suite_OOS):
     target_class = TestCase_MPMC
     spend_time = collections.defaultdict(float)
     prod_cnt_ord = random_ordered_cycle(1, 10)
@@ -491,32 +505,42 @@ if __name__ == '__main__':
     try:
         unittest.main(exit=False)
     finally:
+        print(f"transfer = {Type_0.transfers}")
         for K, V in TestCase_SPSC.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("====================")
+        print(f"transfer = {Type_1.transfers}")
         for K, V in Type_1.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("--------------------")
+        print(f"transfer = {Type_1L.transfers}")
         for K, V in Type_1L.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("--------------------")
+        print(f"transfer = {Type_1O.transfers}")
         for K, V in Type_1O.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("====================")
+        print(f"transfer = {Type_2.transfers}")
         for K, V in Type_2.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("--------------------")
+        print(f"transfer = {Type_2L.transfers}")
         for K, V in Type_2L.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("--------------------")
+        print(f"transfer = {Type_2O.transfers}")
         for K, V in Type_2O.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("====================")
+        print(f"transfer = {Type_3.transfers}")
         for K, V in Type_3.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("--------------------")
+        print(f"transfer = {Type_3L.transfers}")
         for K, V in Type_3L.spend_time.items():
             print(f"{K} : {V: 4.2f}")
         print("--------------------")
+        print(f"transfer = {Type_3O.transfers}")
         for K, V in Type_3O.spend_time.items():
             print(f"{K} : {V: 4.2f}")

@@ -1,65 +1,75 @@
 tests/static_pipe.py
 .............................................................
 ----------------------------------------------------------------------
-Ran 61 tests in 1394.657s
+Ran 61 tests in 728.742s
 
 OK
-data gen :  3.89
-ForkContext :  1.71
-SpawnContext :  4.98
-ForkServerContext :  3.36
-threading :  0.03
+transfer = 205520896
+data gen :  3.58
+ForkContext :  1.82
+SpawnContext :  3.71
+ForkServerContext :  2.62
+threading :  0.02
 ====================
+transfer = 556932
 data gen :  0.01
 search unused :  0.00
-ForkContext :  0.19
-SpawnContext :  1.53
-ForkServerContext :  0.69
+ForkContext :  0.10
+SpawnContext :  0.86
+ForkServerContext :  0.37
 --------------------
-data gen :  42.41
-search unused :  8.00
-ForkContext :  120.58
-SpawnContext :  130.94
-ForkServerContext :  120.19
+transfer = 2714506588
+data gen :  36.85
+search unused :  5.73
+ForkContext :  83.41
+SpawnContext :  88.26
+ForkServerContext :  82.05
 --------------------
-data gen :  20.05
-search unused :  3.52
-ForkContext :  42.13
-SpawnContext :  44.81
-ForkServerContext :  41.73
+transfer = 857628
+data gen :  0.09
+search unused :  0.03
+ForkContext :  1.07
+SpawnContext :  2.39
+ForkServerContext :  1.01
 ====================
+transfer = 249204
+data gen :  0.00
+search unused :  0.00
+ForkContext :  0.32
+SpawnContext :  0.97
+ForkServerContext :  0.34
+--------------------
+transfer = 295093136
+data gen :  3.98
+search unused :  0.57
+ForkContext :  6.19
+SpawnContext :  8.26
+ForkServerContext :  6.32
+--------------------
+transfer = 161034
+data gen :  0.02
+search unused :  0.01
+ForkContext :  0.46
+SpawnContext :  1.76
+ForkServerContext :  0.65
+====================
+transfer = 556932
 data gen :  0.01
 search unused :  0.00
-ForkContext :  0.60
-SpawnContext :  1.81
-ForkServerContext :  0.61
+ForkContext :  0.39
+SpawnContext :  1.55
+ForkServerContext :  0.51
 --------------------
-data gen :  4.55
-search unused :  0.78
-ForkContext :  10.19
-SpawnContext :  13.24
-ForkServerContext :  9.33
+transfer = 2714506588
+data gen :  36.81
+search unused :  5.76
+ForkContext :  104.35
+SpawnContext :  107.21
+ForkServerContext :  105.56
 --------------------
-data gen :  4.51
-search unused :  0.78
-ForkContext :  9.33
-SpawnContext :  11.51
-ForkServerContext :  8.44
-====================
-data gen :  0.01
-search unused :  0.00
-ForkContext :  1.90
-SpawnContext :  3.56
-ForkServerContext :  0.94
---------------------
-data gen :  42.07
-search unused :  8.01
-ForkContext :  154.04
-SpawnContext :  168.65
-ForkServerContext :  148.09
---------------------
-data gen :  20.20
-search unused :  3.43
-ForkContext :  58.22
-SpawnContext :  59.86
-ForkServerContext :  51.28
+transfer = 857625
+data gen :  0.09
+search unused :  0.03
+ForkContext :  5.25
+SpawnContext :  6.44
+ForkServerContext :  5.22

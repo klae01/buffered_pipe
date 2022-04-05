@@ -8,6 +8,8 @@ Buffered pipe through shared memory.
 ## tests
 --------------
 ```shell
+> benchmark_result.txt
+for f in benchmarks/*.py; do python3 "$f" &>> benchmark_result.txt; done
 > test_result.txt
 for f in tests/*.py; do python3 "$f" &>> test_result.txt; done
 ```
