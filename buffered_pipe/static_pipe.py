@@ -10,6 +10,8 @@ class _Pipe:
         assert object_count > 0
         assert concurrency > 0
         assert polling < 1
+        if concurrency == 1:
+            concurrency = 0
         self.fd_pipe = init((object_size, object_count, concurrency, polling))
         self.recv = self.recv_bytes
         self.send = self.send_bytes

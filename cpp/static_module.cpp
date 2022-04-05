@@ -44,6 +44,12 @@ for(int i = 0;i < 10; i ++) \
  + (sizeof(sem_t) + sizeof(pthread_mutex_t)) * concurrency * 2 \
  + obj_size * obj_cnt \
 )
+#define pythread_mutex_lock(lock) \
+if(pthread_mutex_trylock(lock)) { \
+    Py_BEGIN_ALLOW_THREADS \
+    pthread_mutex_lock(lock); \
+    Py_END_ALLOW_THREADS \
+}
 
 const u_int32_t Giga = 1000000000;
 const unsigned int PyBytesObject_SIZE = offsetof(PyBytesObject, ob_sval) + 1;
@@ -114,10 +120,10 @@ struct Pipe_info {
     // manager functions
     void collect(int index) {
         pthread_mutex_t *lock = M_mutex_c + index;
-        sem_t *reserve = (sem_t *)((uintptr_t)this + M_reserve[index]);
-        sem_t *post_target = M_sem + !index;
 
         if(!pthread_mutex_trylock(lock)) {
+            sem_t *reserve = (sem_t *)((uintptr_t)this + M_reserve[index]);
+            sem_t *post_target = M_sem + !index;
             unsigned int lookup = M_lookup[index];
             while(!sem_trywait(reserve + lookup)) {
                 if(++lookup == concurrency)
@@ -130,45 +136,68 @@ struct Pipe_info {
     }
     Ticket wait_ticket (int index) {
         sem_t *sem = M_sem + index;
-        if(sem_trywait(sem)) {
-            int result;
-            struct timespec ts;
-            if (clock_gettime(CLOCK_REALTIME, &ts)) {
-                perror("clock_gettime");
-                exit(-1);
-            }
-            do {
-                ts.tv_sec += (u_int32_t)(polling + ts.tv_nsec) / Giga;
-                ts.tv_nsec = (u_int32_t)(polling + ts.tv_nsec) % Giga;
-
-                collect(!index);
-                
-                if(result = sem_trywait(sem)) {
-                    Py_BEGIN_ALLOW_THREADS
-                    result = sem_timedwait(sem, &ts);
-                    Py_END_ALLOW_THREADS
-                }
-            } while(result && errno == ETIMEDOUT && !PyErr_CheckSignals());
-        }
-
         pthread_mutex_t *lock = &M_mutex_t[index];
-        pthread_mutex_t *elder_lock = (pthread_mutex_t *)((uintptr_t)this + M_elder_lock[index]);
+        if(concurrency) {
+            // Out-of-order protocol
+            pthread_mutex_t *elder_lock = (pthread_mutex_t *)((uintptr_t)this + M_elder_lock[index]);
+            if(sem_trywait(sem)) {
+                int result;
+                struct timespec ts;
+                do {
+                    if (clock_gettime(CLOCK_REALTIME, &ts)) {
+                        perror("clock_gettime");
+                        exit(-1);
+                    }
+                    ts.tv_sec += (u_int32_t)(polling + ts.tv_nsec) / Giga;
+                    ts.tv_nsec = (u_int32_t)(polling + ts.tv_nsec) % Giga;
 
-        pthread_mutex_lock(lock);
-        Ticket RET = {M_pointer[index], M_ticket[index]};
-        pthread_mutex_lock(elder_lock + RET.ticket);
-        M_pointer[index] = (RET.pointer + 1 == obj_cnt? 0 : RET.pointer + 1);
-        M_ticket[index] = (RET.ticket + 1 == concurrency? 0 : RET.ticket + 1);
+                    collect(!index);
+                    
+                    if(result = sem_trywait(sem)) {
+                        Py_BEGIN_ALLOW_THREADS
+                        result = sem_timedwait(sem, &ts);
+                        Py_END_ALLOW_THREADS
+                    }
+                } while(result && errno == ETIMEDOUT && !PyErr_CheckSignals());
+            }
+            pythread_mutex_lock(lock)
+            Ticket RET = {M_pointer[index], M_ticket[index]};
+            pythread_mutex_lock(elder_lock + RET.ticket)
+            M_pointer[index] = (RET.pointer + 1 == obj_cnt? 0 : RET.pointer + 1);
+            M_ticket[index] = (RET.ticket + 1 == concurrency? 0 : RET.ticket + 1);
+            pthread_mutex_unlock(lock);
+            return RET;
+        }
         
-        pthread_mutex_unlock(lock);
-        return RET;
+        else {
+            // In-order protocol
+            if(sem_trywait(sem)) {
+                Py_BEGIN_ALLOW_THREADS
+                sem_wait(sem);
+                Py_END_ALLOW_THREADS
+            }
+            pythread_mutex_lock(lock)
+            Ticket RET = {M_pointer[index], 0};
+            M_pointer[index] = (RET.pointer + 1 == obj_cnt? 0 : RET.pointer + 1);
+            return RET;
+        }
     }
     void post_ticket (int index, unsigned int T) {
-        sem_t *reserve = (sem_t *)((uintptr_t)this + M_reserve[index]);
-        pthread_mutex_t *elder_lock = (pthread_mutex_t *)((uintptr_t)this + M_elder_lock[index]);
-        sem_post(reserve + T);
-        pthread_mutex_unlock(elder_lock + T);
-        collect(index);
+        if(concurrency) {
+            // Out-of-order protocol
+            sem_t *reserve = (sem_t *)((uintptr_t)this + M_reserve[index]);
+            pthread_mutex_t *elder_lock = (pthread_mutex_t *)((uintptr_t)this + M_elder_lock[index]);
+            sem_post(reserve + T);
+            pthread_mutex_unlock(elder_lock + T);
+            collect(index);
+        }
+        else {
+            // In-order protocol
+            sem_t *sem = M_sem + !index;
+            pthread_mutex_t *lock = &M_mutex_t[index];
+            sem_post(sem);
+            pthread_mutex_unlock(lock);
+        }
     }
 };
 
@@ -231,6 +260,7 @@ collect_time
 
 collect_time
     Ticket T = info.wait_ticket(0);
+collect_time
     void* pointer = pipe->info + pipe->buf_offset + T.pointer * info.obj_size;
 
     // unsigned int len = info.obj_size;
@@ -256,6 +286,7 @@ collect_time
     
 collect_time
     Ticket T = info.wait_ticket(1);
+collect_time
     void* pointer = pipe->info + pipe->buf_offset + T.pointer * info.obj_size;
 
     // unsigned int len = info.obj_size;
