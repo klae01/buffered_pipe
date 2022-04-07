@@ -6,15 +6,21 @@ from .generic_module import init, free, recv_bytes, send_bytes
 
 
 class _Pipe:
-    def __init__(self, minimum_write, size):
-        self.fd_pipe = init((minimum_write, size))
+    def __init__(self, minimum_write, buffer_size, concurrency, polling):
+        assert minimum_write > 0
+        assert buffer_size > 0
+        assert minimum_write <= buffer_size
+        assert concurrency > 0
+        assert polling < 1
+        if concurrency == 1:
+            concurrency = 0
+        self.fd_pipe = init((minimum_write, buffer_size, concurrency, polling))
 
     def recv_bytes(self) -> bytes:
-        self.fd_pipe, result = recv_bytes(self.fd_pipe)
-        return b''.join(result)
+        return b''.join(recv_bytes(self.fd_pipe))
 
     def send_bytes(self, data: bytes) -> None:
-        self.fd_pipe = send_bytes((self.fd_pipe, data))
+        send_bytes((self.fd_pipe, data))
 
     def recv(self) -> Any:
         return pickle.loads(self.recv_bytes())
@@ -23,15 +29,13 @@ class _Pipe:
         self.send_bytes(pickle.dumps(item))
 
     def __del__(self):
-        if self.fd_pipe:
-            self.fd_pipe = free(self.fd_pipe)
+        free(self.fd_pipe)
 
 def Pipe(
-    minimum_write: int = 64, size: int = 2 ** 16, duplex: bool = False
+    minimum_write: int = 64, buffer_size: int = 2 ** 16, concurrency: int = 16, polling: float = 0.1, duplex: bool = False
 ) -> Tuple[_Pipe, _Pipe]:
-    assert minimum_write <= size
     if duplex:
-        get_duplex_Pipe(lambda : _Pipe(minimum_write, size))
+        get_duplex_Pipe(lambda : _Pipe(minimum_write, buffer_size, concurrency, polling))
     else:
-        pipe = _Pipe(minimum_write, size)
+        pipe = _Pipe(minimum_write, buffer_size, concurrency, polling)
         return pipe, pipe
