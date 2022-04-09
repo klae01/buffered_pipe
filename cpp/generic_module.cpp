@@ -98,6 +98,7 @@ struct sem_c {
     }
     template <class F>
     u_int64_t strategy_timedwait(u_int64_t min_val, u_int64_t max_val, u_int32_t polling, F collect) {
+        min_val = std::min(min_val, max_val);
 #ifndef SEM_C_WAIT_GUARRENTY_CRITICAL_SESSION
         pythread_mutex_lock(&wait_mutex)
 #endif
@@ -252,14 +253,13 @@ struct Pipe_info {
     }
     bool read_request(void* buf, PyObject* LIST) {
         pysem_wait(&obj_alloc);
-        pythread_mutex_lock(&M_mutex_t[0])
         auto pointer = M_pointer[0];
         auto ticket = M_ticket[0];
         uint64_t chunk_info;
         circular_memcpy(&chunk_info, 8, buf, buf_size, 0, pointer, 8);
 
         int info_length = 0;
-        while(chunk_info & (1LL << info_length)) info_length++;
+        while(chunk_info & (1LL << info_length++));
         char finish = chunk_info >> info_length & 1;
         uint64_t chunk_length = (chunk_info & (1LL << 8 * info_length) - 1) >> info_length + 1;
         uint64_t data_length = chunk_length - info_length;
@@ -329,7 +329,7 @@ struct Pipe_info {
 
         }
 
-        chunk_info = (chunk_length << 1 | chunk_length != length + info_length) << 1;
+        chunk_info = (chunk_length << 1 | finish) << 1;
         for(int i = info_length; --i;chunk_info = chunk_info << 1 | 1);
 
         circular_memcpy(buf, buf_size, &chunk_info, 8, pointer, 0, info_length);
@@ -426,7 +426,7 @@ collect_time
     pythread_mutex_lock(&info.M_mutex_t[1]);
     do {
         lookup += info.write_request(pipe->info + pipe->buf_offset, data_obj.buf + lookup, data_obj.len - lookup);
-    } while(lookup == data_obj.len);
+    } while(lookup != data_obj.len);
 collect_time
 update_time(pipe)
     PyBuffer_Release(&data_obj);
