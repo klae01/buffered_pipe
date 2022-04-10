@@ -53,14 +53,14 @@ if __name__ == '__main__':
         ctx = multiprocessing.get_context(ctx_method)
 
         results += [
-          test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 512, 8, 0.01])
-        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 512, 4, 0.01])
-        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 512, 2, 0.01])
-        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 512, 1, 0.01])
-        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 64, 8, 0.01])
-        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 64, 4, 0.01])
-        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 64, 2, 0.01])
-        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 64, 1, 0.01])
+          test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 512, 8, 8, 0.01])
+        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 512, 4, 4, 0.01])
+        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 512, 2, 2, 0.01])
+        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 512, 1, 1, 0.01])
+        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 64, 8, 8, 0.01])
+        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 64, 4, 4, 0.01])
+        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 64, 2, 2, 0.01])
+        , test(cnt, size, Datas, ctx, method = "Static_Pipe", parameters = [size, 64, 1, 1, 0.01])
         , test(cnt, size, Datas, ctx, method = "Pipe", parameters = [True])
         , test(cnt, size, Datas, ctx, method = "Pipe", parameters = [False])
         ]

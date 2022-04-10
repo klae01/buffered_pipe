@@ -2,7 +2,7 @@ import pandas
 import time
 import multiprocessing
 import os
-from buffered_pipe import Pipe as Generic_Pipe
+from buffered_pipe import Generic_Pipe
 
 def SB(Q, pipe, D):
     Q.put(time.time())
@@ -50,18 +50,18 @@ if __name__ == '__main__':
         ctx = multiprocessing.get_context(ctx_method)
 
         results += [
-          test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**18, 1])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**18, 4])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**18, 16])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**14, 1])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**14, 4])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**14, 16])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**14, 1])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**14, 4])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**14, 16])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**10, 1])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**10, 4])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**10, 16])
+          test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**18, 1, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**18, 4, 4])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**18, 16, 16])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**14, 1, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**14, 4, 4])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2**14, 16, 16])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**14, 1, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**14, 4, 4])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**14, 16, 16])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**10, 1, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**10, 4, 4])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2**10, 16, 16])
         , test(cnt, size, Datas, ctx, method = "Pipe", parameters = [True])
         , test(cnt, size, Datas, ctx, method = "Pipe", parameters = [False])
         ]

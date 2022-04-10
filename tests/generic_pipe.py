@@ -9,7 +9,7 @@ import itertools
 import hashlib
 import os
 
-from buffered_pipe import Pipe
+from buffered_pipe import Generic_Pipe as Pipe
 
 # random_bytes = lambda n: bytes(random.randint(0, 255) for _ in range(n))
 total_gen_bytes = 0
@@ -265,7 +265,7 @@ class TestCase_SPSC:
         self.seed = seed
     def mp_test(self, data, ctx = multiprocessing.get_context()):
         TestCase_SPSC.spend_time[type(ctx).__name__] -= time.time()
-        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency)
+        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency, self.concurrency)
         P = ctx.Process(target = producer, args = (pipe_w, data))
         P.start()
         result = type_tester(pipe_r, data)
@@ -273,7 +273,7 @@ class TestCase_SPSC:
         return result
     def mt_test(self, data):
         TestCase_SPSC.spend_time['threading'] -= time.time()
-        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency)
+        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency, self.concurrency)
         P = threading.Thread(target = producer, args = (pipe_w, data))
         P.start()
         TestCase_SPSC.spend_time['threading'] += time.time()
@@ -326,7 +326,7 @@ class TestCase_MPMC_base:
         self.seed = seed
     def run_test(self, data, end_Data, cons_cnt, ctx = multiprocessing.get_context(), spend_time = None):
         spend_time[type(ctx).__name__] -= time.time()
-        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency)
+        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency, self.concurrency)
         random.seed(type(self).mtmc_seed)
         type(self).mtmc_seed += 1
         mp_prod = random.randrange(0, len(data))

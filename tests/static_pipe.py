@@ -424,7 +424,7 @@ class Test_suite_OOS: # out of standard; object size is not multiple of 4
     # cons_cnt_ord = random_ordered_cycle(1, 4)
     def test_small1(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(1, (1, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1, seed, self)
+            type(self).target_class.test_all(1, (1, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1, seed, self)
     def test_small2(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
             type(self).target_class.test_all(3, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
