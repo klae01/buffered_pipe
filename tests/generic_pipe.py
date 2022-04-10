@@ -8,13 +8,6 @@ import threading
 import itertools
 import hashlib
 import os
-import signal
-
-class TimeoutError(Exception):
-    pass
-def handle_timeout(signum, frame):
-    raise TimeoutError()
-signal.signal(signal.SIGALRM, handle_timeout)
 
 from buffered_pipe import Pipe
 
@@ -36,11 +29,7 @@ def mpmt_producer(pipe, data:list, barrier:multiprocessing.Barrier):
     barrier.wait()
     # print(f"prod pass barrier", "%x"%threading.current_thread().ident)
     for I in data:
-        signal.setitimer(signal.ITIMER_REAL, 1)
-        try:
-            pipe.send(I)
-        finally:
-            signal.alarm(0)
+        pipe.send(I)
     # print(f"prod finish")
     # print(f"prod finish with send {len(data)} elements")
 
@@ -50,14 +39,10 @@ def mpmt_consumer(pipe, RTQ:multiprocessing.Queue, finished:bytes, barrier:multi
     # print(f"cons pass barrier", "%x"%threading.current_thread().ident)
     items = []
     while True:
-        signal.setitimer(signal.ITIMER_REAL, 1)
-        try:
-            data = pipe.recv()
-            if data == finished:
-                break
-            items.append(data)
-        finally:
-            signal.alarm(0)
+        data = pipe.recv()
+        if data == finished:
+            break
+        items.append(data)
     # print(f"cons finish")
     # print(f"cons finish with recv {len(items)} elements")
     RTQ.put(items)
@@ -276,7 +261,7 @@ class TestCase_SPSC:
         self.length = length
         self.count = count
         self.buf_size = buf_size
-        self.concurrency = 1 #concurrency
+        self.concurrency = concurrency
         self.seed = seed
     def mp_test(self, data, ctx = multiprocessing.get_context()):
         TestCase_SPSC.spend_time[type(ctx).__name__] -= time.time()
@@ -337,7 +322,7 @@ class TestCase_MPMC_base:
     def __init__(self, length, buf_size, concurrency, seed):
         self.length = length
         self.buf_size = buf_size
-        self.concurrency = 1 #concurrency
+        self.concurrency = concurrency
         self.seed = seed
     def run_test(self, data, end_Data, cons_cnt, ctx = multiprocessing.get_context(), spend_time = None):
         spend_time[type(ctx).__name__] -= time.time()
