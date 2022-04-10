@@ -2,8 +2,9 @@
 Buffered pipe through shared memory.
 
 ## core features
-- Pipe: free-length data, bytes or picklable
-- Static_Pipe: fixed length data, support bytes only
+- `Pipe`: alias for `Generic_Pipe`
+- `Generic_Pipe`: free-length data, bytes or picklable
+- `Static_Pipe`: fixed length data, only bytes supported
 
 ## tests
 --------------
