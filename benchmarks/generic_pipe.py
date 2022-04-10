@@ -50,14 +50,14 @@ if __name__ == '__main__':
         ctx = multiprocessing.get_context(ctx_method)
 
         results += [
-          test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 8192])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 4096])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2048])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 1024])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 8192])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 4096])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2048])
-        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 1024])
+          test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 8192, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 4096, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 2048, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [64, 1024, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 8192, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 4096, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 2048, 1])
+        , test(cnt, size, Datas, ctx, method = "Generic_Pipe", parameters = [16, 1024, 1])
         , test(cnt, size, Datas, ctx, method = "Pipe", parameters = [True])
         , test(cnt, size, Datas, ctx, method = "Pipe", parameters = [False])
         ]

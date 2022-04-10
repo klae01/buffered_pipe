@@ -52,10 +52,6 @@ if(pthread_mutex_trylock(lock)) { \
     pthread_mutex_lock(lock); \
     Py_END_ALLOW_THREADS \
 }
-#define pythread_cond_wait(cond, lock) \
-Py_BEGIN_ALLOW_THREADS \
-pthread_cond_wait(cond, lock); \
-Py_END_ALLOW_THREADS
 #define pysem_wait(sem) \
 if(sem_trywait(sem)) { \
     Py_BEGIN_ALLOW_THREADS \
@@ -92,9 +88,34 @@ struct sem_c {
     }
     void post(u_int64_t _value = 1) {
         pythread_mutex_lock(&value_mutex)
-        if(value == 0) pthread_cond_signal(&cond);
-        value += _value;
+        if(value == 0) {
+            value = _value;
+            pthread_cond_signal(&cond);
+        } else value += _value;
         pthread_mutex_unlock(&value_mutex);
+    }
+    u_int64_t strategy_wait(u_int64_t min_val, u_int64_t max_val) {
+#ifndef SEM_C_WAIT_GUARRENTY_CRITICAL_SESSION
+        pythread_mutex_lock(&wait_mutex)
+#endif
+        pythread_mutex_lock(&value_mutex)
+        u_int64_t RET = value;
+        value = 0;
+        while(RET < min_val) {
+            Py_BEGIN_ALLOW_THREADS
+            pthread_cond_wait(&cond, &value_mutex);
+            Py_END_ALLOW_THREADS
+            RET += value; value = 0;
+        }
+        if(RET >= max_val) {
+            value += RET - max_val;
+            RET = max_val;
+        }
+#ifndef SEM_C_WAIT_GUARRENTY_CRITICAL_SESSION
+        pthread_mutex_unlock(&wait_mutex);
+#endif
+        pthread_mutex_unlock(&value_mutex);
+        return RET;
     }
     template <class F>
     u_int64_t strategy_timedwait(u_int64_t min_val, u_int64_t max_val, u_int32_t polling, F collect) {
@@ -105,7 +126,6 @@ struct sem_c {
         pythread_mutex_lock(&value_mutex)
         u_int64_t RET = value; value = 0;
         struct timespec ts;
-        int result;
         
         while(RET < min_val) {
             if (clock_gettime(CLOCK_REALTIME, &ts)) {
@@ -118,13 +138,13 @@ struct sem_c {
             collect();
 
             Py_BEGIN_ALLOW_THREADS
-            result = pthread_cond_timedwait(&cond, &value_mutex, &ts);
+            pthread_cond_timedwait(&cond, &value_mutex, &ts);
             Py_END_ALLOW_THREADS
 
             RET += value; value = 0;
         }
         if(RET >= max_val) {
-            value += RET - max_val;
+            value = RET - max_val;
             RET = max_val;
         }
 #ifndef SEM_C_WAIT_GUARRENTY_CRITICAL_SESSION
@@ -239,7 +259,7 @@ struct Pipe_info {
                 uint64_t chunk_info;
                 circular_memcpy(&chunk_info, 8, buf, buf_size, 0, pointer, 8);
                 int info_length = 0;
-                while(chunk_info & (1LL << info_length)) info_length++;
+                while(chunk_info & (1LL << info_length++));
                 uint64_t chunk_length = (chunk_info & (1LL << 8 * info_length) - 1) >> info_length + 1;
                 free_pointer = (pointer + chunk_length) % buf_size;
 
@@ -252,7 +272,30 @@ struct Pipe_info {
         }
     }
     bool read_request(void* buf, PyObject* LIST) {
-        pysem_wait(&obj_alloc);
+        if(concurrency) {
+            if(sem_trywait(&obj_alloc)) {
+                int result;
+                struct timespec ts;
+                do {
+                    if (clock_gettime(CLOCK_REALTIME, &ts)) {
+                        perror("clock_gettime");
+                        exit(-1);
+                    }
+                    ts.tv_sec += (u_int32_t)(polling + ts.tv_nsec) / Giga;
+                    ts.tv_nsec = (u_int32_t)(polling + ts.tv_nsec) % Giga;
+                    
+                    write_collect();
+                    
+                    if(result = sem_trywait(&obj_alloc)) {
+                        Py_BEGIN_ALLOW_THREADS
+                        result = sem_timedwait(&obj_alloc, &ts);
+                        Py_END_ALLOW_THREADS
+                    }
+                } while(result && errno == ETIMEDOUT && !PyErr_CheckSignals());
+            }
+
+        } else pysem_wait(&obj_alloc);
+        
         auto pointer = M_pointer[0];
         auto ticket = M_ticket[0];
         uint64_t chunk_info;
@@ -312,7 +355,8 @@ struct Pipe_info {
         }
     }
     uintptr_t write_request(void* buf, void* data, uint64_t length) {
-        uint64_t chunk_length = mem_free.strategy_timedwait(minimum_write, length + protocol_overhead(length), polling, [this, &buf](){this->read_collect(buf);});
+        uint64_t chunk_length = concurrency? mem_free.strategy_timedwait(minimum_write, length + protocol_overhead(length), polling, [this, &buf](){this->read_collect(buf);}) 
+                                            : mem_free.strategy_wait(minimum_write, length + protocol_overhead(length));
         uint64_t chunk_info;
         auto pointer = M_pointer[1];
         auto ticket = M_ticket[1];

@@ -1,3 +1,78 @@
+tests/generic_pipe.py
+.............................................................
+----------------------------------------------------------------------
+Ran 61 tests in 1193.498s
+
+OK
+transfer = 104379947
+data gen :  3.21
+ForkContext :  14.03
+SpawnContext :  17.36
+ForkServerContext :  15.72
+threading :  0.02
+====================
+transfer = 325437
+data gen :  0.01
+search unused :  0.00
+ForkContext :  0.18
+SpawnContext :  1.36
+ForkServerContext :  0.60
+--------------------
+transfer = 1379161087
+data gen :  32.49
+search unused :  6.16
+ForkContext :  142.80
+SpawnContext :  137.52
+ForkServerContext :  143.50
+--------------------
+transfer = 514164
+data gen :  0.07
+search unused :  0.02
+ForkContext :  1.38
+SpawnContext :  3.35
+ForkServerContext :  1.22
+====================
+transfer = 129874
+data gen :  0.01
+search unused :  0.00
+ForkContext :  0.63
+SpawnContext :  1.62
+ForkServerContext :  0.60
+--------------------
+transfer = 147970031
+data gen :  3.44
+search unused :  0.61
+ForkContext :  13.62
+SpawnContext :  15.92
+ForkServerContext :  12.53
+--------------------
+transfer = 89016
+data gen :  0.01
+search unused :  0.00
+ForkContext :  1.24
+SpawnContext :  3.46
+ForkServerContext :  1.03
+====================
+transfer = 325437
+data gen :  0.01
+search unused :  0.00
+ForkContext :  1.16
+SpawnContext :  3.03
+ForkServerContext :  0.94
+--------------------
+transfer = 1379161087
+data gen :  32.82
+search unused :  6.12
+ForkContext :  182.85
+SpawnContext :  172.32
+ForkServerContext :  181.94
+--------------------
+transfer = 514164
+data gen :  0.07
+search unused :  0.02
+ForkContext :  5.22
+SpawnContext :  6.76
+ForkServerContext :  2.28
 tests/static_pipe.py
 .............................................................
 ----------------------------------------------------------------------

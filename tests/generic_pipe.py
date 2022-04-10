@@ -8,6 +8,13 @@ import threading
 import itertools
 import hashlib
 import os
+import signal
+
+class TimeoutError(Exception):
+    pass
+def handle_timeout(signum, frame):
+    raise TimeoutError()
+signal.signal(signal.SIGALRM, handle_timeout)
 
 from buffered_pipe import Pipe
 
@@ -19,19 +26,21 @@ def random_bytes(n):
     return os.urandom(n)
 
 def dataset(length, count):
-    return [random_bytes(length) for _ in range(count)]
+    return [random_bytes(random.randint(*length)) for _ in range(count)]
 
 def producer(pipe, data):
     for I in data:
         pipe.send(I)
-
 def mpmt_producer(pipe, data:list, barrier:multiprocessing.Barrier):
     # print(f"prod reach barrier", "%x"%threading.current_thread().ident)
     barrier.wait()
     # print(f"prod pass barrier", "%x"%threading.current_thread().ident)
     for I in data:
-        # time.sleep(0.0004)
-        pipe.send(I)
+        signal.setitimer(signal.ITIMER_REAL, 1)
+        try:
+            pipe.send(I)
+        finally:
+            signal.alarm(0)
     # print(f"prod finish")
     # print(f"prod finish with send {len(data)} elements")
 
@@ -41,10 +50,14 @@ def mpmt_consumer(pipe, RTQ:multiprocessing.Queue, finished:bytes, barrier:multi
     # print(f"cons pass barrier", "%x"%threading.current_thread().ident)
     items = []
     while True:
-        data = pipe.recv()
-        if data == finished:
-            break
-        items.append(data)
+        signal.setitimer(signal.ITIMER_REAL, 1)
+        try:
+            data = pipe.recv()
+            if data == finished:
+                break
+            items.append(data)
+        finally:
+            signal.alarm(0)
     # print(f"cons finish")
     # print(f"cons finish with recv {len(items)} elements")
     RTQ.put(items)
@@ -259,14 +272,15 @@ class transfer_tracker:
 
 class TestCase_SPSC:
     spend_time = collections.defaultdict(float)
-    def __init__(self, length, count, buf_size, seed):
+    def __init__(self, length, count, buf_size, concurrency, seed):
         self.length = length
         self.count = count
         self.buf_size = buf_size
+        self.concurrency = 1 #concurrency
         self.seed = seed
     def mp_test(self, data, ctx = multiprocessing.get_context()):
         TestCase_SPSC.spend_time[type(ctx).__name__] -= time.time()
-        pipe_r, pipe_w = Pipe(64, self.length * self.buf_size)
+        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency)
         P = ctx.Process(target = producer, args = (pipe_w, data))
         P.start()
         result = type_tester(pipe_r, data)
@@ -274,14 +288,14 @@ class TestCase_SPSC:
         return result
     def mt_test(self, data):
         TestCase_SPSC.spend_time['threading'] -= time.time()
-        pipe_r, pipe_w = Pipe(64, self.length * self.buf_size)
+        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency)
         P = threading.Thread(target = producer, args = (pipe_w, data))
         P.start()
         TestCase_SPSC.spend_time['threading'] += time.time()
         return type_tester(pipe_r, data)
     @classmethod
-    def test_all(cls, length, count, buf_size, seed, utc):
-        TC = cls(length, count, buf_size, seed)
+    def test_all(cls, length, count, buf_size, concurrency, seed, utc):
+        TC = cls(length, count, buf_size, concurrency, seed)
 
         TestCase_SPSC.spend_time['data gen'] -= time.time()
         random.seed(seed)
@@ -296,37 +310,38 @@ class TestCase_SPSC:
 class Type_0(transfer_tracker, unittest.TestCase):
     def test_small1(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(4, 2**15, 1, seed, self)
+            TestCase_SPSC.test_all((4, 4), 2**15, 5, 1, seed, self)
     def test_small2(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(4, 2**15, 2, seed, self)
+            TestCase_SPSC.test_all((4, 4), 2**15, 20, 1, seed, self)
     def test_small3(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(4, 2**16, 4, seed, self)
+            TestCase_SPSC.test_all((4, 4), 2**15, 16, 4, seed, self)
     def test_small4(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(2**7, 2**14, 4, seed, self)
+            TestCase_SPSC.test_all((1, 2**7), 2**14, 2**5, 4, seed, self)
     def test_small5(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(2**7, 2**14, 1024, seed, self)
+            TestCase_SPSC.test_all((1, 2**7), 2**14, 2**10, 4, seed, self)
     def test_small6(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(2**10, 2**12, 4, seed, self)
+            TestCase_SPSC.test_all((1, 2**10), 2**12, 2**12, 16, seed, self)
     def test_small7(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            TestCase_SPSC.test_all(2**16, 2**8, 4, seed, self)
+            TestCase_SPSC.test_all((1, 2**16), 2**8, 2**18, 16, seed, self)
 
 class TestCase_MPMC_base:
     # mtmc_seed = 0
     # spend_time = collections.defaultdict(float)
     # target_fn = type22_tester
-    def __init__(self, length, buf_size, seed):
+    def __init__(self, length, buf_size, concurrency, seed):
         self.length = length
         self.buf_size = buf_size
+        self.concurrency = 1 #concurrency
         self.seed = seed
     def run_test(self, data, end_Data, cons_cnt, ctx = multiprocessing.get_context(), spend_time = None):
         spend_time[type(ctx).__name__] -= time.time()
-        pipe_r, pipe_w = Pipe(64, (4 + self.length) * self.buf_size)
+        pipe_r, pipe_w = Pipe(64 if 64 < self.buf_size else 2, self.buf_size, self.concurrency)
         random.seed(type(self).mtmc_seed)
         type(self).mtmc_seed += 1
         mp_prod = random.randrange(0, len(data))
@@ -339,8 +354,8 @@ class TestCase_MPMC_base:
         spend_time[type(ctx).__name__] += time.time()
         return result
     @classmethod
-    def test_all(cls, length, data_size_range, prod_cnt, cons_cnt, buf_size, seed, utc):
-        TC = cls(length, buf_size, seed)
+    def test_all(cls, length, data_size_range, prod_cnt, cons_cnt, buf_size, concurrency, seed, utc):
+        TC = cls(length, buf_size, concurrency, seed)
 
         while True:
             utc.spend_time['data gen'] -= time.time()
@@ -350,11 +365,11 @@ class TestCase_MPMC_base:
 
             utc.spend_time['search unused'] -= time.time()
             data_hashes = set(hashlib.sha256(I).digest() for I in itertools.chain.from_iterable(data))
-            end_Data = random_bytes(length)
+            end_Data = dataset(length, 1)[0]
             for _ in range(10):
                 if hashlib.sha256(end_Data).digest() not in data_hashes:
                     break
-                end_Data = random_bytes(length)
+                end_Data = dataset(length, 1)[0]
             utc.spend_time['search unused'] += time.time()
             
             if hashlib.sha256(end_Data).digest() not in data_hashes:
@@ -378,22 +393,22 @@ class Test_suite_base:
     # cons_cnt_ord = random_ordered_cycle(1, 4)
     def test_small1(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(4, (1, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1, seed, self)
+            type(self).target_class.test_all((4, 4), (1, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 5, 1, seed, self)
     def test_small2(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(4, (1, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((4, 4), (1, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 20, 4, seed, self)
     def test_small3(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(4, (10, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((4, 4), (10, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 16, 4, seed, self)
     def test_small4(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(128, (1, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((1, 2**7), (1, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**10, 4, seed, self)
     def test_small5(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(128, (0, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1024, seed, self)
+            type(self).target_class.test_all((1, 2**7), (0, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**16, 16, seed, self)
     def test_small6(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(1024, (0, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((1, 2**10), (0, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**14, 16, seed, self)
 
 class Test_suite_large:
     # target_class = TestCase_MPMC
@@ -401,22 +416,22 @@ class Test_suite_large:
     # cons_cnt_ord = random_ordered_cycle(1, 4)
     def test_small1(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(4, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1, seed, self)
+            type(self).target_class.test_all((4, 4), (1, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2, 1, seed, self)
     def test_small2(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(4, (1, 10000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((4, 4), (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 3, 4, seed, self)
     def test_small3(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(4, (100, 10000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((4, 4), (100, 10000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 16, 4, seed, self)
     def test_small4(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(128, (1, 50000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 32, seed, self)
+            type(self).target_class.test_all((1, 2**7), (1, 50000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**16, 32, seed, self)
     def test_small5(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(128, (0, 100000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1024, seed, self)
+            type(self).target_class.test_all((1, 2**7), (0, 100000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**18, 16, seed, self)
     def test_small6(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(1024, (0, 50000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 32, seed, self)
+            type(self).target_class.test_all((1, 2**10), (0, 50000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**18, 32, seed, self)
 
 class Test_suite_OOS: # out of standard; object size is not multiple of 4
     # target_class = TestCase_MPMC
@@ -424,22 +439,22 @@ class Test_suite_OOS: # out of standard; object size is not multiple of 4
     # cons_cnt_ord = random_ordered_cycle(1, 4)
     def test_small1(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(1, (1, 50), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1, seed, self)
+            type(self).target_class.test_all((1, 1), (1, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2, 1, seed, self)
     def test_small2(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(3, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((1, 3), (1, 10), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**7, 4, seed, self)
     def test_small3(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(7, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((5, 7), (1, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**7, 16, seed, self)
     def test_small4(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(9, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((9, 11), (1, 100), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**7, 16, seed, self)
     def test_small5(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(13, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 1024, seed, self)
+            type(self).target_class.test_all((13, 15), (1, 500), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**9, 16, seed, self)
     def test_small6(self):
         for seed in [123,1251,523,12,3535,167,945,933]:
-            type(self).target_class.test_all(17, (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 4, seed, self)
+            type(self).target_class.test_all((17, 19), (1, 1000), next(type(self).prod_cnt_ord), next(type(self).cons_cnt_ord), 2**9, 20, seed, self)
 
 class TestCase_MPSC(TestCase_MPMC_base):
     mtmc_seed = 0
