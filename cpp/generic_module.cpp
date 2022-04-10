@@ -76,6 +76,7 @@ struct sem_c {
 
         pthread_mutexattr_init(&psharedm);
         pthread_mutexattr_setpshared(&psharedm, PTHREAD_PROCESS_SHARED);
+        pthread_mutexattr_settype(&psharedm, PTHREAD_MUTEX_RECURSIVE);
         pthread_condattr_init(&psharedc);
         pthread_condattr_setpshared(&psharedc, PTHREAD_PROCESS_SHARED);
 
