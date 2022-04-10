@@ -137,6 +137,8 @@ struct sem_c {
             ts.tv_nsec = (u_int32_t)(polling + ts.tv_nsec) % Giga;
 
             collect();
+            RET += value; value = 0;
+            if(RET >= min_val) break;
 
             Py_BEGIN_ALLOW_THREADS
             pthread_cond_timedwait(&cond, &value_mutex, &ts);
