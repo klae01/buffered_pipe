@@ -1,8 +1,11 @@
+from __future__ import annotations
+
+import copy
 import pickle
 from typing import Tuple, Any
 
 from .utils import get_duplex_Pipe
-from .generic_module import init, free, recv_bytes, send_bytes
+from .generic_module import init, free, register, recv_bytes, send_bytes
 
 
 class _Pipe:
@@ -32,6 +35,14 @@ class _Pipe:
 
     def send(self, item) -> None:
         self.send_bytes(pickle.dumps(item))
+
+    def fork(self) -> _Pipe:
+        new = copy.deepcopy(self)
+        register((new.fd_pipe, "NULL_PID"))
+        return new
+    
+    def register(self) -> None:
+        register((self.fd_pipe, "EQUAL"))
 
     def __del__(self):
         free(self.fd_pipe)

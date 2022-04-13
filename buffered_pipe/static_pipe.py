@@ -1,7 +1,10 @@
+from __future__ import annotations
+
+import copy
 from typing import Tuple
 
 from .utils import get_duplex_Pipe
-from .static_module import init, free, recv_bytes, send_bytes
+from .static_module import init, free, register, recv_bytes, send_bytes
 
 
 class _Pipe:
@@ -26,9 +29,16 @@ class _Pipe:
     def send_bytes(self, data: bytes) -> None:
         send_bytes((self.fd_pipe, data))
 
+    def fork(self) -> _Pipe:
+        new = copy.deepcopy(self)
+        register((new.fd_pipe, "NULL_PID"))
+        return new
+    
+    def register(self) -> None:
+        register((self.fd_pipe, "EQUAL"))
+
     def __del__(self):
         free(self.fd_pipe)
-
 
 def Pipe(
     object_size: int,
@@ -44,4 +54,4 @@ def Pipe(
         )
     else:
         pipe = _Pipe(object_size, object_count, SMT_recv, SMT_send, polling)
-        return pipe, pipe
+        return pipe, pipe.fork()

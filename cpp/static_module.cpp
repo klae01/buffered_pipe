@@ -226,9 +226,9 @@ PyObject* __init(PyObject *, PyObject* args) {
     Pipe pipe;
     memset(&pipe, 0, sizeof(Pipe));
     pipe.info_id = shmget(IPC_PRIVATE, SHM_SIZE(obj_size, obj_cnt, concurrency), IPC_CREAT | 0644);
-    pipe.info = shmat(pipe.info_id, NULL, 0);
+    pipe.pid = NULL_PID;
+    mp_request_init(pipe);
     pipe.buf_offset = ((Pipe_info*)pipe.info)->INIT(obj_size, obj_cnt, concurrency, polling * Giga);
-    pipe.pid = getpid();
     return PyBytes_FromStringAndSize((char*) &pipe, sizeof(Pipe));
 }
 
@@ -243,6 +243,38 @@ show_time_spend(pipe)
         pipe->pid = NULL_PID;
     }
     PyBuffer_Release(&pipe_obj);
+    Py_RETURN_NONE;
+}
+
+PyObject* __register(PyObject *, PyObject* args) {
+    Py_buffer pipe_obj, inst_obj;
+    PyArg_ParseTuple(args, "y*s*", &pipe_obj, &inst_obj);
+    Pipe *pipe = (Pipe*)pipe_obj.buf;
+    if(strcmp((char*)inst_obj.buf, "NULL_PID") == 0) {
+        if(pipe->pid != NULL_PID) {
+            pipe->pid = NULL_PID;
+            mp_request_init(*pipe);
+        }
+        else
+            PyErr_SetString(PyExc_BrokenPipeError, "The pipe has already been deleted.");
+    }
+    else if(strcmp((char*)inst_obj.buf, "EQUAL") == 0) {
+        // if(pipe->pid != getpid())
+            mp_request_init(*pipe);
+    }
+    else {
+        char str[120];
+        sprintf(
+            str, 
+            "instruction for register : \n"
+            "-----(start)\n"
+            "%.20s\n"
+            "====(end)\n"
+            "Is not defined in instruction set", (char*)inst_obj.buf);
+        PyErr_SetString(PyExc_NotImplementedError, str);
+    }
+    PyBuffer_Release(&pipe_obj);
+    PyBuffer_Release(&inst_obj);
     Py_RETURN_NONE;
 }
 
@@ -306,6 +338,7 @@ static PyMethodDef methods[] = {
     // function name that contains the implementation.
     { "init", (PyCFunction)__init, METH_O, nullptr },
     { "free", (PyCFunction)__free, METH_O, nullptr },
+    { "register", (PyCFunction)__register, METH_O, nullptr },
     { "recv_bytes", (PyCFunction)recv_bytes, METH_O, nullptr },
     { "send_bytes", (PyCFunction)send_bytes, METH_O, nullptr },
  
