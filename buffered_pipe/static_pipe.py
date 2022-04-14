@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Tuple
 
-from .utils import get_duplex_Pipe
+from .utils import get_duplex_Pipe, UUID
 from .static_module import init, free, register, recv_bytes, send_bytes
 
 
@@ -19,7 +19,8 @@ class _Pipe:
         SMT_send = min(object_count, SMT_send)
         SMT_recv = 0 if SMT_recv <= 1 else SMT_recv
         SMT_send = 0 if SMT_send <= 1 else SMT_send
-        self.fd_pipe = init((object_size, object_count, SMT_recv, polling))
+        self.fd_pipe = None
+        self.fd_pipe = init((object_size, object_count, SMT_recv, polling, UUID()))
         self.recv = self.recv_bytes
         self.send = self.send_bytes
 
@@ -38,7 +39,8 @@ class _Pipe:
         register((self.fd_pipe, "EQUAL"))
 
     def __del__(self):
-        free(self.fd_pipe)
+        if self.fd_pipe:
+            free(self.fd_pipe)
 
 def Pipe(
     object_size: int,

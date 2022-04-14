@@ -4,7 +4,7 @@ import copy
 import pickle
 from typing import Tuple, Any
 
-from .utils import get_duplex_Pipe
+from .utils import get_duplex_Pipe, UUID
 from .generic_module import init, free, register, recv_bytes, send_bytes
 
 
@@ -20,9 +20,8 @@ class _Pipe:
         SMT_send = min(buffer_size // 2, SMT_send)
         SMT_recv = 0 if SMT_recv <= 1 else SMT_recv
         SMT_send = 0 if SMT_send <= 1 else SMT_send
-        self.fd_pipe = init((minimum_write, buffer_size, SMT_recv, polling))
-        self.recv = self.recv_bytes
-        self.send = self.send_bytes
+        self.fd_pipe = None
+        self.fd_pipe = init((minimum_write, buffer_size, SMT_recv, polling, UUID()))
 
     def recv_bytes(self) -> bytes:
         return b"".join(recv_bytes(self.fd_pipe))
@@ -45,7 +44,8 @@ class _Pipe:
         register((self.fd_pipe, "EQUAL"))
 
     def __del__(self):
-        free(self.fd_pipe)
+        if self.fd_pipe:
+            free(self.fd_pipe)
 
 
 def Pipe(
@@ -62,4 +62,4 @@ def Pipe(
         )
     else:
         pipe = _Pipe(minimum_write, buffer_size, SMT_recv, SMT_send, polling)
-        return pipe, pipe
+        return pipe, pipe.fork()
