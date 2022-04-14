@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import copy
+import os
+import struct
+import time
 from typing import Any
+
 
 class Duplex_Pipe:
     def __init__(self, P1, P2, mode = None):
@@ -43,3 +47,7 @@ def get_duplex_Pipe(create_fn):
     pipe_1.set_mode("RW")
     pipe_2.set_mode("WR")
     return pipe_1, pipe_2
+
+def UUID():
+    data = struct.pack("d", time.time())
+    return data + os.urandom(16 - len(data))
