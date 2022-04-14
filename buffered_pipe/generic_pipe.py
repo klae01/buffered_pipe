@@ -37,7 +37,7 @@ class _Pipe:
 
     def fork(self) -> _Pipe:
         new = copy.deepcopy(self)
-        register((new.fd_pipe, "NULL_PID"))
+        register((new.fd_pipe, "TOMB_PID"))
         return new
     
     def register(self) -> None:
