@@ -20,7 +20,7 @@ class _Pipe:
         SMT_recv = 0 if SMT_recv <= 1 else SMT_recv
         SMT_send = 0 if SMT_send <= 1 else SMT_send
         self.fd_pipe = None
-        self.fd_pipe = init((object_size, object_count, SMT_recv, polling, UUID()))
+        self.fd_pipe = bytearray(init((object_size, object_count, SMT_recv, polling, UUID())))
         self.recv = self.recv_bytes
         self.send = self.send_bytes
 
@@ -32,11 +32,11 @@ class _Pipe:
 
     def fork(self) -> _Pipe:
         new = copy.deepcopy(self)
-        register((new.fd_pipe, "TOMB_PID"))
+        register((new.fd_pipe, "FORK"))
         return new
     
     def register(self) -> None:
-        register((self.fd_pipe, "EQUAL"))
+        register((self.fd_pipe, "UPDATE"))
 
     def __del__(self):
         if self.fd_pipe:
