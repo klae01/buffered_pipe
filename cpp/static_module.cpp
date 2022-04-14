@@ -6,6 +6,7 @@
 #include <sys/shm.h>
 #include <sys/types.h>
 #include <semaphore.h>
+#include <pthread.h>
 #include <string.h>
 #include <assert.h>
 #include <stddef.h>
@@ -39,6 +40,7 @@ for(int i = 0;i < 10; i ++) \
 #endif
 
 #define NULL_PID -1
+#define TOMB_PID -2
 #define SHM_SIZE(obj_size, obj_cnt, concurrency) ( \
     sizeof(Pipe_info) \
  + (sizeof(sem_t) + sizeof(pthread_mutex_t)) * concurrency * 2 \
@@ -62,6 +64,7 @@ struct Pipe_info {
     // placed on shared memory
     unsigned int obj_size;
     unsigned int obj_cnt;
+    char UUID[16];
     sem_t M_sem[2];
 
     u_int32_t polling;
@@ -102,7 +105,7 @@ struct Pipe_info {
         pthread_mutex_init(&M_mutex_t[0], &psharedm);
         pthread_mutex_init(&M_mutex_t[1], &psharedm);
 
-        sem_t *sem_PT = (sem_t *) ((void*)this + sizeof(*this));
+        sem_t *sem_PT = (sem_t *) ((char*)this + sizeof(*this));
         M_reserve[0] = (uintptr_t)sem_PT - (uintptr_t)this;
         for(unsigned int i = _concurrency; i--; ) sem_init(sem_PT++, 1, 0);
         M_reserve[1] = (uintptr_t)sem_PT - (uintptr_t)this;
@@ -204,31 +207,104 @@ struct Pipe_info {
 struct Pipe {
     // placed on private memory, save on python
     void *info; // Cached attached shared memory address
+    char UUID[16];
     uintptr_t buf_offset;
     unsigned int info_id;
     pid_t pid;
 pipe_timer_data
 };
 
-void mp_request_init(Pipe &pipe) {
+int mp_request_init(Pipe &pipe) {
+    int exit_code = 0;
     pid_t pid = getpid();
+    if(pipe.pid == TOMB_PID) {
+        PyErr_SetString(PyExc_BrokenPipeError, "Pipe deallocated before attach");
+        return -1;
+    }
     if(pipe.pid != pid) {
-        pipe.info = shmat(pipe.info_id, NULL, 0);
+        if( (intptr_t)(pipe.info = shmat(pipe.info_id, NULL, 0)) == -1 ) {
+            exit_code = -1;
+            switch (errno)
+            {
+                case EACCES:
+                    PyErr_SetString(PyExc_PermissionError,
+"Cannot attach shared memory.\n"
+"Operation permission is denied to the calling process.");
+                    break;
+                case EINVAL:
+                    PyErr_SetString(PyExc_BrokenPipeError, 
+"Cannot attach shared memory.\n"
+"The value of shmid is not a valid shared memory identifier.");
+                    break;
+                case EMFILE:
+                    PyErr_SetString(PyExc_ConnectionError, 
+"Cannot attach shared memory.\n"
+"The number of shared memory segments attached to the calling process would exceed the system-imposed limit.");
+                    break;
+                case ENOMEM:
+                    PyErr_SetString(PyExc_MemoryError, 
+"Cannot attach shared memory.\n"
+"The available data space is not large enough to accommodate the shared memory segment.");
+                    break;
+            }
+        }
         pipe.pid = pid;
     }
+    return exit_code;
+}
+
+int check_pipe_validation(Pipe &pipe) {
+    if( memcmp(pipe.UUID, ((Pipe_info*)pipe.info)->UUID, 16) ) {
+        PyErr_SetString(PyExc_BrokenPipeError, "Pipe deallocated before use");
+        return -1;
+    }
+    return 0;
 }
 
 PyObject* __init(PyObject *, PyObject* args) {
     unsigned int obj_size, obj_cnt, concurrency;
     float polling;
-    PyArg_ParseTuple(args, "IIIf", &obj_size, &obj_cnt, &concurrency, &polling);
+    Py_buffer UUID_obj;
+    PyArg_ParseTuple(args, "IIIfy*", &obj_size, &obj_cnt, &concurrency, &polling, &UUID_obj);
 
     Pipe pipe;
     memset(&pipe, 0, sizeof(Pipe));
-    pipe.info_id = shmget(IPC_PRIVATE, SHM_SIZE(obj_size, obj_cnt, concurrency), IPC_CREAT | 0644);
+    memcpy(pipe.UUID, UUID_obj.buf, UUID_obj.len);
+    // info init SHM
+    if( (pipe.info_id = shmget(IPC_PRIVATE, SHM_SIZE(obj_size, obj_cnt, concurrency), IPC_CREAT | 0644)) < 0) {
+        switch (errno)
+        {
+            case EINVAL:
+                PyErr_SetString(PyExc_PermissionError,
+"Cannot create shared memory.\n"
+"Operation permission is denied to the calling process.");
+                break;
+            case ENOMEM:
+                PyErr_SetString(PyExc_MemoryError, 
+"Cannot create shared memory.\n"
+"The value of size is greater than the system-imposed maximum.");
+                break;
+            case ENOSPC:
+                PyErr_WarnEx(PyExc_ResourceWarning, 
+"A shared memory identifier is to be created but the system-imposed limit on the maximum number of allowed shared memory identifiers system-wide would be exceeded.",
+1);
+                break;
+        }
+        PyBuffer_Release(&UUID_obj);
+        Py_RETURN_NONE;
+    }
     pipe.pid = NULL_PID;
-    mp_request_init(pipe);
-    pipe.buf_offset = ((Pipe_info*)pipe.info)->INIT(obj_size, obj_cnt, concurrency, polling * Giga);
+    if( mp_request_init(pipe) ) {
+        shmctl(pipe.info_id , IPC_RMID , NULL);
+        PyBuffer_Release(&UUID_obj);
+        Py_RETURN_NONE;
+    }
+    shmctl(pipe.info_id , IPC_RMID , NULL);
+    
+    Pipe_info &info = *(Pipe_info*)pipe.info;
+    pipe.buf_offset = info.INIT(obj_size, obj_cnt, concurrency, polling * Giga);
+    memcpy(info.UUID, UUID_obj.buf, UUID_obj.len);
+    PyBuffer_Release(&UUID_obj);
     return PyBytes_FromStringAndSize((char*) &pipe, sizeof(Pipe));
 }
 
@@ -237,10 +313,18 @@ PyObject* __free(PyObject *, PyObject* args) {
     PyObject_GetBuffer(args, &pipe_obj, PyBUF_SIMPLE);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
 show_time_spend(pipe)
-    if(pipe->pid != NULL_PID) {
-        shmdt(pipe->info);
-        shmctl(pipe->info_id , IPC_RMID , NULL);
-        pipe->pid = NULL_PID;
+    if(pipe->pid != getpid()) {
+        if( shmdt(pipe->info) ) {
+            switch (errno)
+            {
+                case EINVAL:
+                    PyErr_SetString(PyExc_BrokenPipeError,
+"Cannot detach shared memory.\n"
+"The value of shmaddr is not the data segment start address of a shared memory segment.");
+                    break;
+            }
+        }
+        pipe->pid = TOMB_PID;
     }
     PyBuffer_Release(&pipe_obj);
     Py_RETURN_NONE;
@@ -250,17 +334,19 @@ PyObject* __register(PyObject *, PyObject* args) {
     Py_buffer pipe_obj, inst_obj;
     PyArg_ParseTuple(args, "y*s*", &pipe_obj, &inst_obj);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
-    if(strcmp((char*)inst_obj.buf, "NULL_PID") == 0) {
-        if(pipe->pid != NULL_PID) {
+    if(strcmp((char*)inst_obj.buf, "TOMB_PID") == 0) {
+        if(pipe->pid != TOMB_PID) {
             pipe->pid = NULL_PID;
-            mp_request_init(*pipe);
+            if( !mp_request_init(*pipe) )
+                check_pipe_validation(*pipe);
         }
         else
             PyErr_SetString(PyExc_BrokenPipeError, "The pipe has already been deleted.");
     }
     else if(strcmp((char*)inst_obj.buf, "EQUAL") == 0) {
-        // if(pipe->pid != getpid())
-            mp_request_init(*pipe);
+        if(pipe->pid != getpid())
+            if( !mp_request_init(*pipe) )
+                check_pipe_validation(*pipe);
     }
     else {
         char str[120];
@@ -284,7 +370,10 @@ collect_time
     Py_buffer pipe_obj;
     PyObject_GetBuffer(args, &pipe_obj, PyBUF_SIMPLE);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
-    mp_request_init(*pipe);
+    if( mp_request_init(*pipe) || check_pipe_validation(*pipe)) {
+        PyBuffer_Release(&pipe_obj);
+        Py_RETURN_NONE;
+    }
     Pipe_info &info = *(Pipe_info*)pipe->info;
 
     PyBytesObject *result = (PyBytesObject *)PyObject_Malloc(PyBytesObject_SIZE + info.obj_size);
@@ -312,14 +401,18 @@ collect_time
     Py_buffer pipe_obj, data_obj;
     PyArg_ParseTuple(args, "y*y*", &pipe_obj, &data_obj);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
-    mp_request_init(*pipe);
+    if( mp_request_init(*pipe) || check_pipe_validation(*pipe)) {
+        PyBuffer_Release(&data_obj);
+        PyBuffer_Release(&pipe_obj);
+        Py_RETURN_NONE;
+    }
     Pipe_info &info = *(Pipe_info*)pipe->info;
     assert(info.obj_size == data_obj.len);
     
 collect_time
     Ticket T = info.wait_ticket(1);
 collect_time
-    void* pointer = pipe->info + pipe->buf_offset + T.pointer * info.obj_size;
+    void* pointer = (char*)pipe->info + pipe->buf_offset + T.pointer * info.obj_size;
 
     // unsigned int len = info.obj_size;
     // char *d_buf = (char *)data_obj.buf;
