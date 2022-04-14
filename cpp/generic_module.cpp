@@ -411,15 +411,13 @@ pipe_timer_data
 };
 
 int mp_request_init(Pipe &pipe) {
-    int exit_code = 0;
-    pid_t pid = getpid();
     if(pipe.pid == TOMB_PID) {
         PyErr_SetString(PyExc_BrokenPipeError, "Pipe deallocated before attach");
         return -1;
     }
+    pid_t pid = getpid();
     if(pipe.pid != pid) {
         if( (intptr_t)(pipe.info = shmat(pipe.info_id, NULL, 0)) == -1 ) {
-            exit_code = -1;
             switch (errno)
             {
                 case EACCES:
@@ -443,10 +441,12 @@ int mp_request_init(Pipe &pipe) {
 "The available data space is not large enough to accommodate the shared memory segment.");
                     break;
             }
+            pipe.pid = TOMB_PID;
+            return -1;
         }
         pipe.pid = pid;
     }
-    return exit_code;
+    return 0;
 }
 
 int check_pipe_validation(Pipe &pipe) {
@@ -511,7 +511,7 @@ PyObject* __free(PyObject *, PyObject* args) {
     PyObject_GetBuffer(args, &pipe_obj, PyBUF_SIMPLE);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
 show_time_spend(pipe)
-    if(pipe->pid != getpid()) {
+    if(pipe->pid == getpid()) {
         if( shmdt(pipe->info) ) {
             switch (errno)
             {
@@ -532,16 +532,14 @@ PyObject* __register(PyObject *, PyObject* args) {
     Py_buffer pipe_obj, inst_obj;
     PyArg_ParseTuple(args, "y*s*", &pipe_obj, &inst_obj);
     Pipe *pipe = (Pipe*)pipe_obj.buf;
-    if(strcmp((char*)inst_obj.buf, "TOMB_PID") == 0) {
-        if(pipe->pid != TOMB_PID) {
-            pipe->pid = NULL_PID;
-            if( !mp_request_init(*pipe) )
-                check_pipe_validation(*pipe);
-        }
-        else
-            PyErr_SetString(PyExc_BrokenPipeError, "The pipe has already been deleted.");
+    if(pipe->pid == TOMB_PID)
+        PyErr_SetString(PyExc_BrokenPipeError, "The pipe has already been deleted.");
+    else if(strcmp((char*)inst_obj.buf, "FORK") == 0) {
+        pipe->pid = NULL_PID;
+        if( !mp_request_init(*pipe) )
+            check_pipe_validation(*pipe);
     }
-    else if(strcmp((char*)inst_obj.buf, "EQUAL") == 0) {
+    else if(strcmp((char*)inst_obj.buf, "UPDATE") == 0) {
         if(pipe->pid != getpid())
             if( !mp_request_init(*pipe) )
                 check_pipe_validation(*pipe);
