@@ -1,0 +1,76 @@
+name: Linux compilation and basic testing
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy: 
+      matrix: 
+        python-version: ['3.7', '3.8', '3.9', '3.10']
+        platform: [ubuntu-18.04, ubuntu-20.04]
+    
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }} with ${{ matrix.platform }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: install repository
+      run: |
+        pip install -e .
+      shell: bash
+    - name: install requirements
+      run: |
+        pip install pandas
+      shell: bash
+    - name: GCC Compatibility Test - small scale test
+      run: |
+        for f in tests/*.py; do
+          python3 -u "$f" O || exit 1;
+        done
+      shell: bash
+    - name: GCC Compatibility Test - Benchmarks
+      run: |
+        for f in benchmarks/*.py; do python3 -u "$f"; done
+      shell: bash
+  test:
+    strategy: 
+      matrix: 
+        python-version: ['3.7', '3.10']
+        platform: [ubuntu-18.04, ubuntu-20.04]
+    
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }} with ${{ matrix.platform }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: install repository
+      run: |
+        pip install -e .
+      shell: bash
+    - name: install requirements
+      run: |
+        pip install pandas
+      shell: bash
+    - name: GCC Compatibility Test - full scale test
+      run: |
+        for f in tests/*.py; do
+          python3 -u "$f" || exit 1;
+        done
+      shell: bash
+      
