@@ -51,7 +51,7 @@ def Pipe(
     duplex: bool = False,
 ) -> Tuple[_Pipe, _Pipe]:
     if duplex:
-        get_duplex_Pipe(
+        return get_duplex_Pipe(
             lambda: _Pipe(object_size, object_count, SMT_recv, SMT_send, polling)
         )
     else:
