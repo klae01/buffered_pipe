@@ -29,13 +29,22 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: install repository
       run: |
-        pip install .
+        pip install -e .
+      shell: bash
     - name: install requirements
       run: |
         pip install pandas
-    - name: GCC Compatibility Test
+      shell: bash
+    - name: GCC Compatibility Test - small scale test
       run: |
-        for f in benchmarks/*.py; do python3 "$f"; done
+        for f in tests/*.py; do
+          python3 -u "$f" O || exit 1;
+        done
+      shell: bash
+    - name: GCC Compatibility Test - Benchmarks
+      run: |
+        for f in benchmarks/*.py; do python3 -u "$f"; done
+      shell: bash
   test:
     strategy: 
       matrix: 
@@ -52,10 +61,16 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: install repository
       run: |
-        pip install .
+        pip install -e .
+      shell: bash
     - name: install requirements
       run: |
         pip install pandas
-    - name: GCC Compatibility Test
+      shell: bash
+    - name: GCC Compatibility Test - full scale test
       run: |
-        for f in tests/*.py; do python3 "$f"; done
+        for f in tests/*.py; do
+          python3 -u "$f" || exit 1;
+        done
+      shell: bash
+      
