@@ -380,7 +380,7 @@ collect_time
 collect_time
     Ticket T = info.wait_ticket(0);
 collect_time
-    void* pointer = pipe->info + pipe->buf_offset + T.pointer * info.obj_size;
+    void* pointer = (char*)pipe->info + pipe->buf_offset + T.pointer * info.obj_size;
 
     // unsigned int len = info.obj_size;
     // char *d_buf = (char *)result->ob_sval;

@@ -574,7 +574,7 @@ collect_time
     PyObject *result = PyList_New(0);
 collect_time
     pythread_mutex_lock(&info.M_mutex_t[0])
-    while(info.read_request(pipe->info + pipe->buf_offset, result));
+    while(info.read_request((char*)pipe->info + pipe->buf_offset, result));
 collect_time
 update_time(pipe)
     PyBuffer_Release(&pipe_obj);
@@ -597,7 +597,7 @@ collect_time
 collect_time
     pythread_mutex_lock(&info.M_mutex_t[1]);
     do {
-        lookup += info.write_request((char*)pipe->info + pipe->buf_offset, data_obj.buf + lookup, data_obj.len - lookup);
+        lookup += info.write_request((char*)pipe->info + pipe->buf_offset, (char*)data_obj.buf + lookup, data_obj.len - lookup);
     } while(lookup != data_obj.len);
 collect_time
 update_time(pipe)
