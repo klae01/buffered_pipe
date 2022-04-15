@@ -11,7 +11,7 @@ from buffered_pipe import Generic_Pipe, Static_Pipe
 CTX = ["fork", "spawn", "forkserver"]
 CTX = [multiprocessing.get_context(I) for I in CTX]
 TYPE = ["Generic_Pipe", "Static_Pipe"]
-PIPE = [lambda: Generic_Pipe(64, 1024, duplex=True), lambda: Static_Pipe(64, 4, duplex=True)]
+PIPE = [lambda: Generic_Pipe(1024, 64, duplex=True), lambda: Static_Pipe(64, 4, duplex=True)]
 DATA = [lambda: os.urandom(random.randrange(512)), lambda: os.urandom(64)]
 
 

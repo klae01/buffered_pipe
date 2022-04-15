@@ -16,6 +16,7 @@ class _Pipe:
         assert SMT_recv >= 0
         assert SMT_send >= 0
         assert polling < 1
+        minimum_write = min(minimum_write, buffer_size)
         SMT_recv = min(buffer_size // 2, SMT_recv)
         SMT_send = min(buffer_size // 2, SMT_send)
         SMT_recv = 0 if SMT_recv <= 1 else SMT_recv
@@ -39,7 +40,7 @@ class _Pipe:
         new = copy.deepcopy(self)
         register((new.fd_pipe, "FORK"))
         return new
-    
+
     def register(self) -> None:
         register((self.fd_pipe, "UPDATE"))
 
@@ -49,17 +50,15 @@ class _Pipe:
 
 
 def Pipe(
-    minimum_write: int,
     buffer_size: int,
+    minimum_write: int = 64,
     SMT_recv: int = 16,
     SMT_send: int = 16,
     polling: float = 0.1,
     duplex: bool = False,
 ) -> Tuple[_Pipe, _Pipe]:
     if duplex:
-        return get_duplex_Pipe(
-            lambda: _Pipe(minimum_write, buffer_size, SMT_recv, SMT_send, polling)
-        )
+        return get_duplex_Pipe(lambda: _Pipe(minimum_write, buffer_size, SMT_recv, SMT_send, polling))
     else:
         pipe = _Pipe(minimum_write, buffer_size, SMT_recv, SMT_send, polling)
         return pipe, pipe.fork()
