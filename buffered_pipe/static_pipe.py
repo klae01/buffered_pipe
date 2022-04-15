@@ -34,13 +34,14 @@ class _Pipe:
         new = copy.deepcopy(self)
         register((new.fd_pipe, "FORK"))
         return new
-    
+
     def register(self) -> None:
         register((self.fd_pipe, "UPDATE"))
 
     def __del__(self):
         if self.fd_pipe:
             free(self.fd_pipe)
+
 
 def Pipe(
     object_size: int,
@@ -51,9 +52,7 @@ def Pipe(
     duplex: bool = False,
 ) -> Tuple[_Pipe, _Pipe]:
     if duplex:
-        return get_duplex_Pipe(
-            lambda: _Pipe(object_size, object_count, SMT_recv, SMT_send, polling)
-        )
+        return get_duplex_Pipe(lambda: _Pipe(object_size, object_count, SMT_recv, SMT_send, polling))
     else:
         pipe = _Pipe(object_size, object_count, SMT_recv, SMT_send, polling)
         return pipe, pipe.fork()

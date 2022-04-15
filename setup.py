@@ -17,7 +17,7 @@ DESCRIPTION = 'Buffered pipe through shared memory.'
 URL = 'https://github.com/klae01/buffered_pipe'
 EMAIL = 'tspt2479@gmail.com'
 AUTHOR = 'klae01'
-REQUIRES_PYTHON = '>=3.6.0'
+REQUIRES_PYTHON = '>=3.7.0'
 VERSION = None #'0.0.0'
 project_slug = 'buffered_pipe'
 
@@ -125,12 +125,16 @@ setup(
     classifiers=[
         # Trove classifiers
         # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
-        'Development Status :: 2 - Pre-Alpha',
+        'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
         'Operating System :: POSIX :: Linux',
+        'Programming Language :: C++',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
     ],
     # $ setup.py publish support.
     cmdclass={
