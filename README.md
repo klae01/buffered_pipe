@@ -1,5 +1,9 @@
-# buffered_pipe
-Buffered pipe through shared memory.
+[![IPC: BufferedPipe](https://img.shields.io/badge/IPC-BufferedPipe-f35aff.svg)](https://github.com/klae01/buffered_pipe)
+[![PyPI status](https://badge.fury.io/py/buffered-pipe.svg)](https://pypi.org/project/buffered-pipe/)
+[![Python versions supported](https://img.shields.io/pypi/pyversions/buffered-pipe.svg?logo=python)](https://pypi.org/project/buffered-pipe/)
+
+High-speed IPC via shared memory.
+
 
 ## core features
 - `Pipe`: alias for `Generic_Pipe`
@@ -90,13 +94,3 @@ if __name__ == "__main__":
 - The `object_size` of `Static_Pipe` is in `bytes`.
 - `object_count` in `Static_Pipe` is the maximum number of objects placed in the buffer.
 - `duplex` is equivalent to `multiprocessing.Pipe`.
-
-
-## tests
---------------
-```shell
-> benchmark_result.txt
-for f in benchmarks/*.py; do python3 "$f" &>> benchmark_result.txt; done
-> test_result.txt
-for f in tests/*.py; do python3 "$f" &>> test_result.txt; done
-```
